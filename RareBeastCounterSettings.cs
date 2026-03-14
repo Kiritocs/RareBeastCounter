@@ -21,6 +21,9 @@ public class RareBeastCounterSettings : ISettings
 
     [Menu("Completed Message Window", "Separate window shown after all beasts are found.")]
     public CompletedMessageWindowSettings CompletedMessageWindow { get; set; } = new();
+
+    [Menu("Analytics Window", "Separate window for map/session timing and valuable beast spawn analytics.")]
+    public AnalyticsWindowSettings AnalyticsWindow { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = false)]
@@ -29,8 +32,20 @@ public class VisibilitySettings
     [Menu("Hide In Hideout", "Do not show counter/message while inside hideouts.")]
     public ToggleNode HideInHideout { get; set; } = new(true);
 
-    [Menu("Hide On Fullscreen Panels", "Do not show counter/message while any fullscreen UI panel is visible.")]
+    [Menu("Hide On Fullscreen Panels", "Do not show overlays while any fullscreen UI panel is visible.")]
     public ToggleNode HideOnFullscreenPanels { get; set; } = new(true);
+
+    [Menu("Hide On Open Left Panel", "Hide counter/message while OpenLeftPanel is visible.")]
+    public ToggleNode HideOnOpenLeftPanel { get; set; } = new(true);
+
+    [Menu("Hide On Open Right Panel", "Hide counter/message while OpenRightPanel is visible.")]
+    public ToggleNode HideOnOpenRightPanel { get; set; } = new(true);
+
+    [Menu("Hide Analytics On Open Left Panel", "Hide analytics overlay while OpenLeftPanel is visible.")]
+    public ToggleNode HideAnalyticsOnOpenLeftPanel { get; set; } = new(true);
+
+    [Menu("Hide Analytics On Open Right Panel", "Hide analytics overlay while OpenRightPanel is visible.")]
+    public ToggleNode HideAnalyticsOnOpenRightPanel { get; set; } = new(true);
 }
 
 [Submenu(CollapsedByDefault = false)]
@@ -118,4 +133,44 @@ public class CompletedMessageWindowSettings
 
     [Menu("Background Color", "Background color of the completed message window.")]
     public ColorNode BackgroundColor { get; set; } = new(new Color(0, 0, 0, 200));
+}
+
+[Submenu(CollapsedByDefault = false)]
+public class AnalyticsWindowSettings
+{
+    [Menu("Show", "Show or hide the analytics window.")]
+    public ToggleNode Show { get; set; } = new(true);
+
+    [Menu("Reset Session", "Reset current analytics session counters and timers (hold Shift while pressing).")]
+    public ButtonNode ResetSession { get; set; } = new();
+
+    [Menu("Save Session To File", "Save the current session snapshot to a CSV file.")]
+    public ButtonNode SaveSessionToFile { get; set; } = new();
+
+    [Menu("X Position (%)", "Horizontal position of the analytics window.")]
+    public RangeNode<float> XPos { get; set; } = new(50, 0, 100);
+
+    [Menu("Y Position (%)", "Vertical position of the analytics window.")]
+    public RangeNode<float> YPos { get; set; } = new(25, 0, 100);
+
+    [Menu("Padding", "Inner spacing between analytics text and window border.")]
+    public RangeNode<float> Padding { get; set; } = new(8, 0, 50);
+
+    [Menu("Border Thickness", "Border thickness of the analytics window.")]
+    public RangeNode<int> BorderThickness { get; set; } = new(1, 1, 10);
+
+    [Menu("Border Rounding", "Corner roundness of the analytics window.")]
+    public RangeNode<float> BorderRounding { get; set; } = new(0, 0, 25);
+
+    [Menu("Text Scale", "Text scale of the analytics window.")]
+    public RangeNode<float> TextScale { get; set; } = new(1.0f, 0.5f, 6f);
+
+    [Menu("Text Color", "Text color of analytics lines.")]
+    public ColorNode TextColor { get; set; } = new(new Color(220, 220, 220, 255));
+
+    [Menu("Border Color", "Border color of the analytics window.")]
+    public ColorNode BorderColor { get; set; } = new(new Color(90, 90, 90, 255));
+
+    [Menu("Background Color", "Background color of the analytics window.")]
+    public ColorNode BackgroundColor { get; set; } = new(new Color(0, 0, 0, 180));
 }

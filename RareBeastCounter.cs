@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
 using ExileCore;
@@ -10,25 +9,115 @@ using ExileCore.Shared.Enums;
 using ImGuiNET;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
-using Vector4 = System.Numerics.Vector4;
 
 namespace RareBeastCounter;
 
-public class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
+public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
 {
     private const string CounterLabel = "Rare Beasts Found";
+    private const string MapTimePrefix = "Map Time:";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
+    private static readonly string[] RedBeastMetadataPatterns =
+    [
+        // Craicic (The Deep)
+        "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
+        "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
+
+        // Farric (The Wilds)
+        "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
+        "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
+        "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary",
+
+        // Fenumal (The Caverns)
+        "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
+        "SandLeaperBestiary",
+
+        // Saqawine (The Sands)
+        "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
+
+        // Harvest & special
+        "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
+        "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
+    ];
+
+    private static readonly TrackedBeast[] ValuableTrackedBeasts =
+    [
+        new("Vivid Vulture", ["HarvestVultureParasiteT3"]),
+        new("Wild Bristle Matron", ["HarvestBeastT3"]),
+        new("Wild Hellion Alpha", ["HarvestHellionT3"]),
+        new("Vicious Hound", ["ViciousHound", "PitbullBestiary"]),
+        new("Black Mórrigan", ["GullGoliathBestiary", "Morrigan"])
+    ];
+
     private readonly HashSet<long> _countedRareBeastIds = new();
+    private readonly HashSet<long> _sessionProcessedRareBeastIds = new();
+    private readonly Dictionary<string, int> _valuableBeastCounts = ValuableTrackedBeasts.ToDictionary(x => x.Name, _ => 0);
+
     private int _rareBeastsFound;
+    private int _totalRedBeastsSession;
+    private DateTime _sessionStartUtc;
+    private TimeSpan _sessionPausedDuration = TimeSpan.Zero;
+    private DateTime? _pauseMenuSessionStartUtc;
+    private DateTime? _currentMapStartUtc;
+    private TimeSpan _currentMapElapsed = TimeSpan.Zero;
+    private TimeSpan _completedMapsDuration = TimeSpan.Zero;
+    private int _completedMapCount;
+    private bool _isCurrentAreaTrackable;
+    private string _activeMapAreaHash;
+    private Type _cachedGameType;
+    private System.Reflection.PropertyInfo _cachedIsEscapeStateProperty;
 
     public RareBeastCounter()
     {
         Name = "Rare Beast Counter";
     }
 
+    public override void OnLoad()
+    {
+        _sessionStartUtc = DateTime.UtcNow;
+
+        var currentArea = GameController?.Area?.CurrentArea;
+        _isCurrentAreaTrackable = currentArea is { IsTown: false, IsHideout: false };
+        if (_isCurrentAreaTrackable)
+        {
+            _activeMapAreaHash = RareBeastCounterHelpers.TryGetAreaHashText(currentArea);
+            _currentMapStartUtc = DateTime.UtcNow;
+        }
+
+        Settings.AnalyticsWindow.ResetSession.OnPressed = ResetSessionAnalytics;
+        Settings.AnalyticsWindow.SaveSessionToFile.OnPressed = SaveSessionSnapshotToFile;
+    }
+
     public override void AreaChange(AreaInstance area)
     {
+        var now = DateTime.UtcNow;
+        var newAreaHash = RareBeastCounterHelpers.TryGetAreaHashText(area);
+        var newAreaTrackable = area is { IsTown: false, IsHideout: false };
+
+        PauseCurrentMapTimer(now);
+
+        if (!newAreaTrackable)
+        {
+            _isCurrentAreaTrackable = false;
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(_activeMapAreaHash) &&
+            string.Equals(newAreaHash, _activeMapAreaHash, StringComparison.Ordinal))
+        {
+            _isCurrentAreaTrackable = true;
+            _currentMapStartUtc = now;
+            return;
+        }
+
+        FinalizePausedMap();
+
+        _activeMapAreaHash = newAreaHash;
+        _currentMapElapsed = TimeSpan.Zero;
+        _isCurrentAreaTrackable = true;
+        _currentMapStartUtc = now;
+
         ResetCounter();
     }
 
@@ -37,78 +126,85 @@ public class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
         if (IsRareBeast(entity) && _countedRareBeastIds.Add(entity.Id))
         {
             _rareBeastsFound++;
+            RegisterSessionRareBeast(entity);
         }
     }
 
     public override void Render()
     {
-        if (!ShouldRenderOverlays())
+        ApplyPauseMenuTimerState(DateTime.UtcNow);
+
+        var shouldRenderCounterAndMessage = ShouldRenderCounterAndMessageOverlays();
+        var shouldRenderAnalytics = ShouldRenderAnalyticsOverlay();
+
+        if (!shouldRenderCounterAndMessage && !(shouldRenderAnalytics && Settings.AnalyticsWindow.Show.Value))
         {
             return;
         }
 
-        BuildCounterDisplay(out var counterText, out var allBeastsFound);
-        var showCompletedCounterStyle = allBeastsFound || Settings.CompletedCounter.ShowWhileNotComplete.Value;
-
-        var counterTextColor = showCompletedCounterStyle ? Settings.CompletedCounter.TextColor.Value : Settings.CounterWindow.TextColor.Value;
-        var counterBorderColor = showCompletedCounterStyle ? Settings.CompletedCounter.BorderColor.Value : Settings.CounterWindow.BorderColor.Value;
-        var counterTextScale = showCompletedCounterStyle ? Settings.CompletedCounter.TextScale.Value : Settings.CounterWindow.TextScale.Value;
-
-        DrawOverlayWindow(
-            "##RareBeastCounterOverlay",
-            counterText,
-            Settings.CounterWindow.XPos.Value,
-            Settings.CounterWindow.YPos.Value,
-            Settings.CounterWindow.Padding.Value,
-            Settings.CounterWindow.BorderThickness.Value,
-            Settings.CounterWindow.BorderRounding.Value,
-            counterTextScale,
-            counterTextColor,
-            counterBorderColor,
-            Settings.CounterWindow.BackgroundColor.Value);
-
-        var shouldShowCompletedMessage =
-            Settings.CompletedMessageWindow.Show.Value &&
-            !string.IsNullOrWhiteSpace(Settings.CompletedMessageWindow.Text.Value) &&
-            (allBeastsFound || Settings.CompletedMessageWindow.ShowWhileNotComplete.Value);
-
-        if (shouldShowCompletedMessage)
+        if (shouldRenderCounterAndMessage)
         {
+            BuildCounterDisplay(out var counterText, out var allBeastsFound);
+            var showCompletedCounterStyle = allBeastsFound || Settings.CompletedCounter.ShowWhileNotComplete.Value;
+
+            var counterTextColor = showCompletedCounterStyle ? Settings.CompletedCounter.TextColor.Value : Settings.CounterWindow.TextColor.Value;
+            var counterBorderColor = showCompletedCounterStyle ? Settings.CompletedCounter.BorderColor.Value : Settings.CounterWindow.BorderColor.Value;
+            var counterTextScale = showCompletedCounterStyle ? Settings.CompletedCounter.TextScale.Value : Settings.CounterWindow.TextScale.Value;
+
             DrawOverlayWindow(
-                "##RareBeastCounterCompletedMessageOverlay",
-                Settings.CompletedMessageWindow.Text.Value,
-                Settings.CompletedMessageWindow.XPos.Value,
-                Settings.CompletedMessageWindow.YPos.Value,
-                Settings.CompletedMessageWindow.Padding.Value,
-                Settings.CompletedMessageWindow.BorderThickness.Value,
-                Settings.CompletedMessageWindow.BorderRounding.Value,
-                Settings.CompletedMessageWindow.TextScale.Value,
-                Settings.CompletedMessageWindow.TextColor.Value,
-                Settings.CompletedMessageWindow.BorderColor.Value,
-                Settings.CompletedMessageWindow.BackgroundColor.Value);
-        }
-    }
+                "##RareBeastCounterOverlay",
+                counterText,
+                Settings.CounterWindow.XPos.Value,
+                Settings.CounterWindow.YPos.Value,
+                Settings.CounterWindow.Padding.Value,
+                Settings.CounterWindow.BorderThickness.Value,
+                Settings.CounterWindow.BorderRounding.Value,
+                counterTextScale,
+                counterTextColor,
+                counterBorderColor,
+                Settings.CounterWindow.BackgroundColor.Value);
 
-    private bool ShouldRenderOverlays()
-    {
-        var ingameState = GameController?.IngameState;
-        var ingameUi = ingameState?.IngameUi;
-        if (ingameState == null || ingameUi == null)
+            var shouldShowCompletedMessage =
+                Settings.CompletedMessageWindow.Show.Value &&
+                !string.IsNullOrWhiteSpace(Settings.CompletedMessageWindow.Text.Value) &&
+                (allBeastsFound || Settings.CompletedMessageWindow.ShowWhileNotComplete.Value);
+
+            if (shouldShowCompletedMessage)
+            {
+                DrawOverlayWindow(
+                    "##RareBeastCounterCompletedMessageOverlay",
+                    Settings.CompletedMessageWindow.Text.Value,
+                    Settings.CompletedMessageWindow.XPos.Value,
+                    Settings.CompletedMessageWindow.YPos.Value,
+                    Settings.CompletedMessageWindow.Padding.Value,
+                    Settings.CompletedMessageWindow.BorderThickness.Value,
+                    Settings.CompletedMessageWindow.BorderRounding.Value,
+                    Settings.CompletedMessageWindow.TextScale.Value,
+                    Settings.CompletedMessageWindow.TextColor.Value,
+                    Settings.CompletedMessageWindow.BorderColor.Value,
+                    Settings.CompletedMessageWindow.BackgroundColor.Value);
+            }
+        }
+
+        if (shouldRenderAnalytics && Settings.AnalyticsWindow.Show.Value)
         {
-            return false;
+            var analyticsText = BuildAnalyticsDisplayText();
+            if (!string.IsNullOrWhiteSpace(analyticsText))
+            {
+                DrawOverlayWindow(
+                    "##RareBeastCounterAnalyticsOverlay",
+                    analyticsText,
+                    Settings.AnalyticsWindow.XPos.Value,
+                    Settings.AnalyticsWindow.YPos.Value,
+                    Settings.AnalyticsWindow.Padding.Value,
+                    Settings.AnalyticsWindow.BorderThickness.Value,
+                    Settings.AnalyticsWindow.BorderRounding.Value,
+                    Settings.AnalyticsWindow.TextScale.Value,
+                    Settings.AnalyticsWindow.TextColor.Value,
+                    Settings.AnalyticsWindow.BorderColor.Value,
+                    Settings.AnalyticsWindow.BackgroundColor.Value);
+            }
         }
-
-        if (Settings.Visibility.HideInHideout.Value && GameController.Area?.CurrentArea?.IsHideout == true)
-        {
-            return false;
-        }
-
-        if (Settings.Visibility.HideOnFullscreenPanels.Value && ingameUi.FullscreenPanels.Any(x => x.IsVisible))
-        {
-            return false;
-        }
-
-        return true;
     }
 
     private void DrawOverlayWindow(
@@ -139,8 +235,8 @@ public class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
         ImGui.SetNextWindowPos(position, ImGuiCond.Always);
         ImGui.SetNextWindowSize(estimatedWindowSize, ImGuiCond.Always);
 
-        ImGui.PushStyleColor(ImGuiCol.WindowBg, ToImGuiColor(backgroundColor));
-        ImGui.PushStyleColor(ImGuiCol.Border, ToImGuiColor(borderColor));
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, RareBeastCounterHelpers.ToImGuiColor(backgroundColor));
+        ImGui.PushStyleColor(ImGuiCol.Border, RareBeastCounterHelpers.ToImGuiColor(borderColor));
         ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, borderRounding);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, borderThickness);
         ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(padding, padding));
@@ -155,7 +251,7 @@ public class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
 
         ImGui.Begin(windowId, flags);
         ImGui.SetWindowFontScale(textScale);
-        ImGui.TextColored(ToImGuiColor(textColor), text);
+        ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(textColor), text);
         ImGui.SetWindowFontScale(1f);
         ImGui.End();
 
@@ -195,97 +291,5 @@ public class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
         text = $"{CounterLabel}: {_rareBeastsFound}";
     }
 
-    private bool TryGetBeastQuestProgress(out int current, out int total)
-    {
-        current = 0;
-        total = 0;
-
-        var questTracker = GetQuestTracker();
-        if (questTracker == null)
-        {
-            return false;
-        }
-
-        if (TryParseBeastQuestProgress(GetPrimaryQuestText(questTracker), out current, out total))
-        {
-            return true;
-        }
-
-        var questEntries = GetQuestEntriesContainer(questTracker)?.Children;
-        if (questEntries == null)
-        {
-            return false;
-        }
-
-        foreach (var questEntry in questEntries)
-        {
-            if (questEntry?.IsVisible != true)
-            {
-                continue;
-            }
-
-            if (TryParseBeastQuestProgress(GetQuestEntryText(questEntry), out current, out total))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private Element GetQuestTracker()
-    {
-        return GameController?.IngameState?.IngameUi?.GetChildAtIndex(4);
-    }
-
-    private static Element GetQuestEntriesContainer(Element questTracker)
-    {
-        return questTracker
-            .GetChildAtIndex(0)
-            ?.GetChildAtIndex(0)
-            ?.GetChildAtIndex(0);
-    }
-
-    private static string GetPrimaryQuestText(Element questTracker)
-    {
-        return GetQuestEntryText(GetQuestEntriesContainer(questTracker)?.GetChildAtIndex(0));
-    }
-
-    private static string GetQuestEntryText(Element questEntry)
-    {
-        return questEntry
-            ?.GetChildAtIndex(0)
-            ?.GetChildAtIndex(1)
-            ?.GetChildAtIndex(0)
-            ?.GetChildAtIndex(1)
-            ?.Text;
-    }
-
-    private static bool TryParseBeastQuestProgress(string questText, out int current, out int total)
-    {
-        current = 0;
-        total = 0;
-
-        if (string.IsNullOrWhiteSpace(questText) ||
-            !questText.Contains("beast", StringComparison.OrdinalIgnoreCase) &&
-            !questText.Contains("einhar", StringComparison.OrdinalIgnoreCase))
-        {
-            return false;
-        }
-
-        var match = QuestProgressRegex.Match(questText);
-        if (!match.Success)
-        {
-            return false;
-        }
-
-        current = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-        total = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
-        return true;
-    }
-
-    private static Vector4 ToImGuiColor(Color color)
-    {
-        return new Vector4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f);
-    }
+    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns);
 }
