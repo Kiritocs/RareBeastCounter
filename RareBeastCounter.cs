@@ -14,32 +14,37 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSettings>
 {
-    private const string CounterLabel = "Rare Beasts Found";
+    private const string CounterLabel = "Beasts Found";
     private const string MapTimePrefix = "Map Time:";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
     private static readonly string[] RedBeastMetadataPatterns =
-    [
-        // Craicic (The Deep)
-        "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
-        "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
+[
+    // Craicic (The Deep)
+    "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
+    "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
 
         // Farric (The Wilds)
-        "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
-        "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
-        "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary",
+    "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
+    "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
+    "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary", "PurgeHoundBestiary",
 
-        // Fenumal (The Caverns)
-        "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
-        "SandLeaperBestiary",
+    // Fenumal (The Caverns)
+    "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
+    "SandLeaperBestiary",
 
-        // Saqawine (The Sands)
-        "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
+    // Saqawine (The Sands)
+    "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
 
-        // Harvest & special
-        "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
-        "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
-    ];
+    // Spirit Bosses — Farrul (TigerBestiarySpiritBoss) and Fenumus (SpiderPlatedBestiarySpiritBoss)
+    // are already matched by TigerBestiary and SpiderPlatedBestiary above via substring.
+    // Saqawal and Craiceann need explicit entries:
+    "MarakethBirdSpiritBoss", "NessaCrabBestiarySpiritBoss",
+
+    // Harvest & special
+    "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
+    "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
+];
 
     private static readonly TrackedBeast[] ValuableTrackedBeasts =
     [

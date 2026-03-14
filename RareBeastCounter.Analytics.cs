@@ -32,7 +32,7 @@ public partial class RareBeastCounter
                     continue;
                 }
 
-                lines.Add(RareBeastCounterHelpers.CsvEscape(analyticsLine));
+                lines.Add(RareBeastCounterHelpers.CsvEscape(analyticsLine.Trim()));
             }
 
             File.WriteAllLines(filePath, lines);
