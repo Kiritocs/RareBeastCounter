@@ -59,10 +59,6 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         new("Vicious Hound",  ["ViciousHound", "PitbullBestiary"]),
         new("Black Mórrigan", ["GullGoliathBestiary", "Morrigan"]),
-
-        // Yellow (bestiary tier) beasts — capturable but not red
-        new("Sand Scorpion",       ["YellowScorpion"],            IsYellow: true),
-        new("Goatman Fire-raiser", ["GoatmanShamanFireChampion"], IsYellow: true),
     ];
 
     private readonly HashSet<long> _countedRareBeastIds = new();
@@ -365,5 +361,5 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         _wasBestiaryTabVisible = isVisible;
     }
 
-    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns, bool IsYellow = false);
+    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns);
 }

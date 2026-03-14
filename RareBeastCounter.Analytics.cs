@@ -51,11 +51,6 @@ public partial class RareBeastCounter
 
         if (!IsRedBeastByMetadata(entity.Metadata))
         {
-            // Still track if this is a valuable yellow beast (not counted toward red total)
-            if (TryGetValuableTrackedBeastName(entity.Metadata, out var yellowBeastName))
-            {
-                _valuableBeastCounts[yellowBeastName]++;
-            }
             return;
         }
 
@@ -148,21 +143,11 @@ public partial class RareBeastCounter
             var count = _valuableBeastCounts[tracked.Name];
             var countText = count.ToString("N0", CultureInfo.InvariantCulture);
 
-            if (tracked.IsYellow)
-            {
-                var freqText = count > 0
-                    ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
-                    : "no sightings yet";
-                lines.Add($"{tracked.Name}: {countText} ({freqText})");
-            }
-            else
-            {
-                double pct = denominator > 0 ? count * 100d / denominator : 0d;
-                var freqText = count > 0
-                    ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
-                    : "no sightings yet";
-                lines.Add($"{tracked.Name}: {countText} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({freqText})");
-            }
+            double pct = denominator > 0 ? count * 100d / denominator : 0d;
+            var freqText = count > 0
+                ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
+                : "no sightings yet";
+            lines.Add($"{tracked.Name}: {countText} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({freqText})");
         }
 
         return lines;
