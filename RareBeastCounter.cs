@@ -65,6 +65,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private int _completedMapCount;
     private bool _isCurrentAreaTrackable;
     private string _activeMapAreaHash;
+    private bool _wasBestiaryTabVisible;
     private Type _cachedGameType;
     private System.Reflection.PropertyInfo _cachedIsEscapeStateProperty;
 
@@ -133,6 +134,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     public override void Render()
     {
         ApplyPauseMenuTimerState(DateTime.UtcNow);
+        ApplyBestiaryClipboard();
 
         var shouldRenderCounterAndMessage = ShouldRenderCounterAndMessageOverlays();
         var shouldRenderAnalytics = ShouldRenderAnalyticsOverlay();
@@ -289,6 +291,23 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         }
 
         text = $"{CounterLabel}: {_rareBeastsFound}";
+    }
+
+    private void ApplyBestiaryClipboard()
+    {
+        if (!Settings.BestiaryClipboard.EnableAutoCopy.Value)
+        {
+            _wasBestiaryTabVisible = false;
+            return;
+        }
+
+        var isVisible = IsBestiaryTabVisible();
+        if (isVisible && !_wasBestiaryTabVisible)
+        {
+            ImGui.SetClipboardText(Settings.BestiaryClipboard.BeastRegex.Value ?? string.Empty);
+        }
+
+        _wasBestiaryTabVisible = isVisible;
     }
 
     private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns);

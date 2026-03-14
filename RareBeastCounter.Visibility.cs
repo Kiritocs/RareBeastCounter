@@ -83,4 +83,29 @@ public partial class RareBeastCounter
         return checkLeft && ingameUi.OpenLeftPanel?.IsVisible == true ||
                checkRight && ingameUi.OpenRightPanel?.IsVisible == true;
     }
+
+    private static bool IsConfiguredSidePanelOpen(bool hideSetting, Element panel)
+    {
+        return hideSetting && panel?.IsVisible == true;
+    }
+
+    private bool IsBestiaryTabVisible()
+    {
+        try
+        {
+            return GameController?.IngameState?.IngameUi
+                ?.GetChildAtIndex(50)
+                ?.GetChildAtIndex(2)
+                ?.GetChildAtIndex(0)
+                ?.GetChildAtIndex(1)
+                ?.GetChildAtIndex(1)
+                ?.GetChildAtIndex(15)
+                ?.GetChildAtIndex(0)
+                ?.IsVisible == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 }

@@ -24,6 +24,9 @@ public class RareBeastCounterSettings : ISettings
 
     [Menu("Analytics Window", "Separate window for map/session timing and valuable beast spawn analytics.")]
     public AnalyticsWindowSettings AnalyticsWindow { get; set; } = new();
+
+    [Menu("Bestiary Clipboard", "Auto-copy a regex to clipboard when the Bestiary tab is opened.")]
+    public BestiaryClipboardSettings BestiaryClipboard { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = false)]
@@ -173,4 +176,14 @@ public class AnalyticsWindowSettings
 
     [Menu("Background Color", "Background color of the analytics window.")]
     public ColorNode BackgroundColor { get; set; } = new(new Color(0, 0, 0, 180));
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class BestiaryClipboardSettings
+{
+    [Menu("Enable Auto-Copy", "Automatically copy the regex to clipboard when the Bestiary tab becomes visible.")]
+    public ToggleNode EnableAutoCopy { get; set; } = new(true);
+
+    [Menu("Beast Regex", "Regex copied to clipboard when the Bestiary tab opens.")]
+    public TextNode BeastRegex { get; set; } = new("id v|le m|ld h|s ho|k m|an fi|ul, f|cic c|nd sc|s, f|d bra|l pla|n, f|l cru| cy");
 }
