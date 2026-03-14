@@ -51,6 +51,11 @@ public partial class RareBeastCounter
 
         if (!IsRedBeastByMetadata(entity.Metadata))
         {
+            // Still track if this is a valuable yellow beast (not counted toward red total)
+            if (TryGetValuableTrackedBeastName(entity.Metadata, out var yellowBeastName))
+            {
+                _valuableBeastCounts[yellowBeastName]++;
+            }
             return;
         }
 
@@ -104,12 +109,6 @@ public partial class RareBeastCounter
         return false;
     }
 
-    private string BuildAnalyticsDisplayText()
-    {
-        var lines = BuildAnalyticsLines();
-        return lines.Count > 0 ? string.Join("\n", lines) : string.Empty;
-    }
-
     private List<string> BuildAnalyticsLines()
     {
         var lines = new List<string>(4 + ValuableTrackedBeasts.Length);
@@ -147,14 +146,23 @@ public partial class RareBeastCounter
         foreach (var tracked in ValuableTrackedBeasts)
         {
             var count = _valuableBeastCounts[tracked.Name];
-            double pct = denominator > 0 ? count * 100d / denominator : 0d;
+            var countText = count.ToString("N0", CultureInfo.InvariantCulture);
 
-            var frequencyText = count > 0
-                ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
-                : "no sightings yet";
-
-            lines.Add(
-                $"{tracked.Name}: {count.ToString("N0", CultureInfo.InvariantCulture)} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({frequencyText})");
+            if (tracked.IsYellow)
+            {
+                var freqText = count > 0
+                    ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
+                    : "no sightings yet";
+                lines.Add($"{tracked.Name}: {countText} ({freqText})");
+            }
+            else
+            {
+                double pct = denominator > 0 ? count * 100d / denominator : 0d;
+                var freqText = count > 0
+                    ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
+                    : "no sightings yet";
+                lines.Add($"{tracked.Name}: {countText} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({freqText})");
+            }
         }
 
         return lines;

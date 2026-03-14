@@ -19,45 +19,56 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
     private static readonly string[] RedBeastMetadataPatterns =
-[
-    // Craicic (The Deep)
-    "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
-    "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
+    [
+        // Craicic (The Deep) 9 beasts
+        "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
+        "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
 
-        // Farric (The Wilds)
-    "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
-    "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
-    "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary", "PurgeHoundBestiary",
+        // Farric (The Wilds) 15 beasts
+        "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
+        "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
+        "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary", "PurgeHoundBestiary",
 
-    // Fenumal (The Caverns)
-    "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
-    "SandLeaperBestiary",
+        // Fenumal (The Caverns) 7 beasts
+        "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
+        "SandLeaperBestiary",
 
-    // Saqawine (The Sands)
-    "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
+        // Saqawine (The Sands) 7 beasts
+        "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
 
-    // Spirit Bosses — Farrul (TigerBestiarySpiritBoss) and Fenumus (SpiderPlatedBestiarySpiritBoss)
-    // are already matched by TigerBestiary and SpiderPlatedBestiary above via substring.
-    // Saqawal and Craiceann need explicit entries:
-    "MarakethBirdSpiritBoss", "NessaCrabBestiarySpiritBoss",
+        // Spirit Bosses 4 beasts
+        "MarakethBirdSpiritBoss", "NessaCrabBestiarySpiritBoss", "TigerBestiarySpiritBoss", "SpiderPlatedBestiarySpiritBoss",
 
-    // Harvest & special
-    "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
-    "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
-];
+        // Harvest & special 10 beasts
+        "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
+        "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
+    ];
 
     private static readonly TrackedBeast[] ValuableTrackedBeasts =
     [
-        new("Vivid Vulture", ["HarvestVultureParasiteT3"]),
+        new("Farrul, First of the Plains",  ["TigerBestiarySpiritBoss"]),
+        new("Fenumus, First of the Night",  ["SpiderPlatedBestiarySpiritBoss"]),
+
+        new("Vivid Vulture",       ["HarvestVultureParasiteT3"]),
         new("Wild Bristle Matron", ["HarvestBeastT3"]),
-        new("Wild Hellion Alpha", ["HarvestHellionT3"]),
-        new("Vicious Hound", ["ViciousHound", "PitbullBestiary"]),
-        new("Black Mórrigan", ["GullGoliathBestiary", "Morrigan"])
+        new("Wild Hellion Alpha",  ["HarvestHellionT3"]),
+        new("Wild Brambleback",    ["HarvestBrambleHulkT3"]),
+
+        new("Craicic Chimeral",         ["GemFrogBestiary"]),
+        new("Fenumal Plagued Arachnid", ["SpiderPlagueBestiary"]),
+
+        new("Vicious Hound",  ["ViciousHound", "PitbullBestiary"]),
+        new("Black Mórrigan", ["GullGoliathBestiary", "Morrigan"]),
+
+        // Yellow (bestiary tier) beasts — capturable but not red
+        new("Sand Scorpion",       ["YellowScorpion"],            IsYellow: true),
+        new("Goatman Fire-raiser", ["GoatmanShamanFireChampion"], IsYellow: true),
     ];
 
     private readonly HashSet<long> _countedRareBeastIds = new();
     private readonly HashSet<long> _sessionProcessedRareBeastIds = new();
     private readonly Dictionary<string, int> _valuableBeastCounts = ValuableTrackedBeasts.ToDictionary(x => x.Name, _ => 0);
+    private bool _analyticsCollapsed;
 
     private int _rareBeastsFound;
     private int _totalRedBeastsSession;
@@ -195,23 +206,62 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         if (shouldRenderAnalytics && Settings.AnalyticsWindow.Show.Value)
         {
-            var analyticsText = BuildAnalyticsDisplayText();
-            if (!string.IsNullOrWhiteSpace(analyticsText))
-            {
-                DrawOverlayWindow(
-                    "##RareBeastCounterAnalyticsOverlay",
-                    analyticsText,
-                    Settings.AnalyticsWindow.XPos.Value,
-                    Settings.AnalyticsWindow.YPos.Value,
-                    Settings.AnalyticsWindow.Padding.Value,
-                    Settings.AnalyticsWindow.BorderThickness.Value,
-                    Settings.AnalyticsWindow.BorderRounding.Value,
-                    Settings.AnalyticsWindow.TextScale.Value,
-                    Settings.AnalyticsWindow.TextColor.Value,
-                    Settings.AnalyticsWindow.BorderColor.Value,
-                    Settings.AnalyticsWindow.BackgroundColor.Value);
-            }
+            DrawAnalyticsWindow();
         }
+    }
+
+    private void DrawAnalyticsWindow()
+    {
+        var allLines = BuildAnalyticsLines();
+        if (allLines.Count == 0) return;
+
+        var displayText = _analyticsCollapsed
+            ? allLines[0].Trim()
+            : string.Join("\n", allLines);
+
+        var s = Settings.AnalyticsWindow;
+        var windowRect = GameController.Window.GetWindowRectangle();
+        var anchor = new Vector2(
+            windowRect.Width * (s.XPos.Value / 100f),
+            windowRect.Height * (s.YPos.Value / 100f));
+
+        var baseTextSize = ImGui.CalcTextSize(displayText);
+        var estimatedWindowSize = new Vector2(
+            baseTextSize.X * s.TextScale.Value + s.Padding.Value * 2,
+            baseTextSize.Y * s.TextScale.Value + s.Padding.Value * 2);
+
+        var position = new Vector2(anchor.X, anchor.Y);
+
+        ImGui.SetNextWindowPos(position, ImGuiCond.Always);
+        ImGui.SetNextWindowSize(estimatedWindowSize, ImGuiCond.Always);
+
+        ImGui.PushStyleColor(ImGuiCol.WindowBg, RareBeastCounterHelpers.ToImGuiColor(s.BackgroundColor.Value));
+        ImGui.PushStyleColor(ImGuiCol.Border, RareBeastCounterHelpers.ToImGuiColor(s.BorderColor.Value));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowRounding, s.BorderRounding.Value);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, s.BorderThickness.Value);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(s.Padding.Value, s.Padding.Value));
+
+        const ImGuiWindowFlags flags =
+            ImGuiWindowFlags.NoDecoration |
+            ImGuiWindowFlags.NoSavedSettings |
+            ImGuiWindowFlags.NoFocusOnAppearing |
+            ImGuiWindowFlags.NoBringToFrontOnFocus |
+            ImGuiWindowFlags.NoMove;
+
+        ImGui.Begin("##RareBeastCounterAnalyticsOverlay", flags);
+        ImGui.SetWindowFontScale(s.TextScale.Value);
+        ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(s.TextColor.Value), displayText);
+        ImGui.SetWindowFontScale(1f);
+
+        if (ImGui.IsWindowHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Right))
+        {
+            _analyticsCollapsed = !_analyticsCollapsed;
+        }
+
+        ImGui.End();
+
+        ImGui.PopStyleVar(3);
+        ImGui.PopStyleColor(2);
     }
 
     private void DrawOverlayWindow(
@@ -237,7 +287,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             baseTextSize.X * textScale + padding * 2,
             baseTextSize.Y * textScale + padding * 2);
 
-        var position = new Vector2(anchor.X - estimatedWindowSize.X / 2f, anchor.Y);
+        var position = new Vector2(anchor.X, anchor.Y);
 
         ImGui.SetNextWindowPos(position, ImGuiCond.Always);
         ImGui.SetNextWindowSize(estimatedWindowSize, ImGuiCond.Always);
@@ -315,5 +365,5 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         _wasBestiaryTabVisible = isVisible;
     }
 
-    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns);
+    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns, bool IsYellow = false);
 }
