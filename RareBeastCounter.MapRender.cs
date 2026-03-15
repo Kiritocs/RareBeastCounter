@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements.InventoryElements;
+using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
 using GameOffsets.Native;
 using ImGuiNET;
@@ -19,6 +20,10 @@ public partial class RareBeastCounter
 {
     private const int TileToGridConversion = 23;
     private const int TileToWorldConversion = 250;
+    private const string CaptureMonsterTrappedBuffName = "capture_monster_trapped";
+    private const string CapturingSuffix = " (Capturing)";
+    private const string CapturingLabel = "CAPTURING";
+    private static readonly Color CapturingColor = new(255, 40, 40, 255);
     private const float GridToWorldMultiplier = TileToWorldConversion / (float)TileToGridConversion;
     private const double CameraAngle = 38.7 * Math.PI / 180;
     private static readonly float CameraAngleCos = (float)Math.Cos(CameraAngle);
@@ -118,7 +123,6 @@ public partial class RareBeastCounter
         foreach (var (_, entity) in _trackedBeastEntities)
         {
             if (!entity.IsValid) continue;
-            if (entity.Buffs?.Find(b => b.Name == "capture_monster_trapped") != null) continue;
 
             var beastName = GetTrackedBeastName(entity.Metadata);
             if (beastName == null) continue;
@@ -127,11 +131,17 @@ public partial class RareBeastCounter
             var positioned = entity.GetComponent<Positioned>();
             if (positioned == null) continue;
 
+            var isBeingCaptured = IsBeastBeingCaptured(entity);
             var worldPos = GameController.IngameState.Data.ToWorldWithTerrainHeight(positioned.GridPosition);
             var screenPos = GameController.IngameState.Camera.WorldToScreen(worldPos);
-            var color = GetBeastColor(beastName);
+            var color = GetBeastColor(beastName, isBeingCaptured);
 
             Graphics.DrawText(beastName, screenPos, color, FontAlign.Center);
+            if (isBeingCaptured)
+            {
+                Graphics.DrawText(CapturingLabel, screenPos + new Vector2(0, 18), CapturingColor, FontAlign.Center);
+                Graphics.DrawText(CapturingLabel, screenPos + new Vector2(1, 19), CapturingColor, FontAlign.Center);
+            }
             DrawFilledCircleInWorld(worldPos, 50, color);
         }
     }
@@ -186,7 +196,6 @@ public partial class RareBeastCounter
         foreach (var (_, entity) in _trackedBeastEntities)
         {
             if (!entity.IsValid) continue;
-            if (entity.Buffs?.Find(b => b.Name == "capture_monster_trapped") != null) continue;
 
             var beastName = GetTrackedBeastName(entity.Metadata);
             if (beastName == null) continue;
@@ -206,12 +215,13 @@ public partial class RareBeastCounter
                 playerHeight + beastHeight);
             var mapPos = mapCenter + mapDelta;
 
-            var showName = Settings.MapRender.ShowNameInsteadOfPrice.Value;
+            var isBeingCaptured = IsBeastBeingCaptured(entity);
+            var showName = Settings.MapRender.ShowNameInsteadOfPrice.Value || isBeingCaptured;
             var label = showName
-                ? beastName
+                ? GetDisplayedBeastLabel(beastName, isBeingCaptured)
                 : (_beastPrices.TryGetValue(beastName, out var price) && price >= 0 ? $"{price:0}c" : beastName);
 
-            DrawMapLabel(label, mapPos, GetBeastColor(beastName));
+            DrawMapLabel(label, mapPos, GetBeastColor(beastName, isBeingCaptured));
         }
     }
 
@@ -238,10 +248,10 @@ public partial class RareBeastCounter
     private void DrawTrackedBeastsWindow()
     {
         var visible = _trackedBeastEntities.Values
-            .Where(e => e.IsValid && e.Buffs?.Find(b => b.Name == "capture_monster_trapped") == null)
-            .Select(e => GetTrackedBeastName(e.Metadata))
-            .Where(n => n != null &&
-                        (!Settings.MapRender.ShowEnabledOnly.Value || Settings.BeastPrices.EnabledBeasts.Contains(n)))
+            .Where(e => e.IsValid)
+            .Select(e => new { Name = GetTrackedBeastName(e.Metadata), IsBeingCaptured = IsBeastBeingCaptured(e) })
+            .Where(x => x.Name != null &&
+                        (!Settings.MapRender.ShowEnabledOnly.Value || Settings.BeastPrices.EnabledBeasts.Contains(x.Name)))
             .ToList();
 
         if (visible.Count == 0) return;
@@ -255,13 +265,14 @@ public partial class RareBeastCounter
             ImGui.TableSetupColumn("Price", ImGuiTableColumnFlags.WidthFixed, 52);
             ImGui.TableSetupColumn("Beast", ImGuiTableColumnFlags.WidthStretch);
 
-            foreach (var name in visible)
+            foreach (var beast in visible)
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.Text(_beastPrices.TryGetValue(name, out var price) && price >= 0 ? $"{price:0}c" : "?");
+                ImGui.Text(_beastPrices.TryGetValue(beast.Name, out var price) && price >= 0 ? $"{price:0}c" : "?");
                 ImGui.TableNextColumn();
-                ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(GetBeastColor(name)), name);
+                ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(GetBeastColor(beast.Name, beast.IsBeingCaptured)),
+                    GetDisplayedBeastLabel(beast.Name, beast.IsBeingCaptured));
             }
 
             ImGui.EndTable();
@@ -389,7 +400,18 @@ public partial class RareBeastCounter
         Graphics.DrawPolyLine(pts.ToArray(), color, 2);
     }
 
-    private static Color GetBeastColor(string _) => new(255, 165, 0, 255);
+    private static bool IsBeastBeingCaptured(Entity entity)
+    {
+        return entity.Buffs?.Find(b => b.Name == CaptureMonsterTrappedBuffName) != null;
+    }
+
+    private static string GetDisplayedBeastLabel(string beastName, bool isBeingCaptured)
+    {
+        return isBeingCaptured ? $"{beastName}{CapturingSuffix}" : beastName;
+    }
+
+    private static Color GetBeastColor(string _, bool isBeingCaptured = false) =>
+        isBeingCaptured ? CapturingColor : new Color(255, 165, 0, 255);
 
     private static string GetTrackedBeastName(string metadata) =>
         TryGetValuableTrackedBeastName(metadata, out var name) ? name : null;
