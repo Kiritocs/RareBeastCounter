@@ -1,8 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
-using System.Linq;
 using ExileCore.PoEMemory.MemoryObjects;
 
 namespace RareBeastCounter;
@@ -16,14 +15,15 @@ public partial class RareBeastCounter
             var directory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config", "RareBeastCounterSessions");
             Directory.CreateDirectory(directory);
 
-            var analyticsLines = BuildAnalyticsLines();
+            var analyticsLines = BuildAnalyticsLines(includeBeastBreakdown: true);
+            var now = DateTime.Now;
 
-            var fileName = $"RareBeastCounter_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+            var fileName = $"RareBeastCounter_{now:yyyyMMdd_HHmmss}.csv";
             var filePath = Path.Combine(directory, fileName);
 
-            var lines = new List<string>
+            var lines = new List<string>(analyticsLines.Count)
             {
-                RareBeastCounterHelpers.CsvEscape(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
+                RareBeastCounterHelpers.CsvEscape(now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture))
             };
 
             foreach (var analyticsLine in analyticsLines)
@@ -45,40 +45,15 @@ public partial class RareBeastCounter
 
     private void RegisterSessionRareBeast(Entity entity)
     {
-        if (!_sessionProcessedRareBeastIds.Add(entity.Id))
-        {
-            return;
-        }
+        _sessionBeastsFound++;
 
-        if (!IsRedBeastByMetadata(entity.Metadata))
+        if (!TryGetValuableTrackedBeastName(entity.Metadata, out var beastName))
         {
             return;
         }
 
         _totalRedBeastsSession++;
-
-        if (TryGetValuableTrackedBeastName(entity.Metadata, out var beastName))
-        {
-            _valuableBeastCounts[beastName]++;
-        }
-    }
-
-    private static bool IsRedBeastByMetadata(string metadata)
-    {
-        if (string.IsNullOrWhiteSpace(metadata))
-        {
-            return false;
-        }
-
-        foreach (var pattern in RedBeastMetadataPatterns)
-        {
-            if (metadata.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-            {
-                return true;
-            }
-        }
-
-        return false;
+        _valuableBeastCounts[beastName]++;
     }
 
     private static bool TryGetValuableTrackedBeastName(string metadata, out string beastName)
@@ -105,15 +80,23 @@ public partial class RareBeastCounter
         return false;
     }
 
-    private List<string> BuildAnalyticsLines()
+    private List<string> BuildAnalyticsLines(bool includeBeastBreakdown = true)
     {
-        var lines = new List<string>(4 + AllRedBeasts.Length);
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
+        var lines = new List<string>(includeBeastBreakdown ? 4 + enabledBeasts.Count : 1);
         var now = DateTime.UtcNow;
 
         var currentMapTime = _currentMapElapsed;
         if (_isCurrentAreaTrackable && _currentMapStartUtc.HasValue)
         {
             currentMapTime += now - _currentMapStartUtc.Value;
+        }
+
+        lines.Add($"Map Time: {RareBeastCounterHelpers.FormatDuration(currentMapTime)}");
+
+        if (!includeBeastBreakdown)
+        {
+            return lines;
         }
 
         var totalSessionTime = now - _sessionStartUtc - _sessionPausedDuration;
@@ -131,16 +114,21 @@ public partial class RareBeastCounter
             ? TimeSpan.FromTicks(_completedMapsDuration.Ticks / _completedMapCount)
             : TimeSpan.Zero;
 
-        lines.Add($"Map Time: {RareBeastCounterHelpers.FormatDuration(currentMapTime)}");
         lines.Add($"Avg Map: {(_completedMapCount > 0 ? RareBeastCounterHelpers.FormatDuration(averageMapTime) : "n/a")} ({_completedMapCount} maps)");
         lines.Add($"Session: {RareBeastCounterHelpers.FormatDuration(totalSessionTime)}");
-        lines.Add($"Beasts Found (Session): {_sessionProcessedRareBeastIds.Count.ToString("N0", CultureInfo.InvariantCulture)}");
+        lines.Add($"Beasts Found (Session): {_sessionBeastsFound.ToString("N0", CultureInfo.InvariantCulture)}");
 
         var denominator = _totalRedBeastsSession;
         var denominatorText = denominator.ToString("N0", CultureInfo.InvariantCulture);
 
-        foreach (var tracked in AllRedBeasts.Where(b => Settings.BeastPrices.EnabledBeasts.Contains(b.Name)))
+        var enabledBeastSet = new HashSet<string>(enabledBeasts);
+        foreach (var tracked in AllRedBeasts)
         {
+            if (!enabledBeastSet.Contains(tracked.Name))
+            {
+                continue;
+            }
+
             var count = _valuableBeastCounts[tracked.Name];
             var countText = count.ToString("N0", CultureInfo.InvariantCulture);
 
@@ -155,3 +143,12 @@ public partial class RareBeastCounter
         return lines;
     }
 }
+
+
+
+
+
+
+
+
+

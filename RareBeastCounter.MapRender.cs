@@ -22,8 +22,7 @@ public partial class RareBeastCounter
     private const int TileToWorldConversion = 250;
     private const string CaptureMonsterTrappedBuffName = "capture_monster_trapped";
     private const string CapturingSuffix = " (Capturing)";
-    private const string CapturingLabel = "CAPTURING";
-    private static readonly Color CapturingColor = new(255, 40, 40, 255);
+    private const string CapturingLabel = "!!! CAPTURING !!!";
     private const float GridToWorldMultiplier = TileToWorldConversion / (float)TileToGridConversion;
     private const double CameraAngle = 38.7 * Math.PI / 180;
     private static readonly float CameraAngleCos = (float)Math.Cos(CameraAngle);
@@ -134,15 +133,25 @@ public partial class RareBeastCounter
             var isBeingCaptured = IsBeastBeingCaptured(entity);
             var worldPos = GameController.IngameState.Data.ToWorldWithTerrainHeight(positioned.GridPosition);
             var screenPos = GameController.IngameState.Camera.WorldToScreen(worldPos);
-            var color = GetBeastColor(beastName, isBeingCaptured);
+            var worldBeastColor = GetWorldBeastColor(isBeingCaptured);
+            var lineSpacing = Settings.MapRender.Layout.WorldTextLineSpacing.Value;
 
-            Graphics.DrawText(beastName, screenPos, color, FontAlign.Center);
+            DrawOutlinedText(beastName, screenPos, worldBeastColor);
+
+            var nextLineOffset = lineSpacing;
+            if (TryGetBeastPriceText(beastName, out var priceText))
+            {
+                DrawOutlinedText(priceText, screenPos + new Vector2(0, nextLineOffset), Settings.MapRender.Colors.WorldPriceTextColor.Value);
+                nextLineOffset += lineSpacing;
+            }
+
             if (isBeingCaptured)
             {
-                Graphics.DrawText(CapturingLabel, screenPos + new Vector2(0, 18), CapturingColor, FontAlign.Center);
-                Graphics.DrawText(CapturingLabel, screenPos + new Vector2(1, 19), CapturingColor, FontAlign.Center);
+                DrawOutlinedText(CapturingLabel, screenPos + new Vector2(0, nextLineOffset), Settings.MapRender.Colors.WorldCaptureTextColor.Value);
+                DrawFilledCircleInWorld(worldPos, Settings.MapRender.Layout.WorldCaptureRingRadius.Value, Settings.MapRender.Colors.WorldCaptureRingColor.Value);
             }
-            DrawFilledCircleInWorld(worldPos, 50, color);
+
+            DrawFilledCircleInWorld(worldPos, Settings.MapRender.Layout.WorldBeastCircleRadius.Value, worldBeastColor);
         }
     }
 
@@ -216,12 +225,9 @@ public partial class RareBeastCounter
             var mapPos = mapCenter + mapDelta;
 
             var isBeingCaptured = IsBeastBeingCaptured(entity);
-            var showName = Settings.MapRender.ShowNameInsteadOfPrice.Value || isBeingCaptured;
-            var label = showName
-                ? GetDisplayedBeastLabel(beastName, isBeingCaptured)
-                : (_beastPrices.TryGetValue(beastName, out var price) && price >= 0 ? $"{price:0}c" : beastName);
+            var label = GetMapMarkerLabel(beastName, isBeingCaptured);
 
-            DrawMapLabel(label, mapPos, GetBeastColor(beastName, isBeingCaptured));
+            DrawMapMarker(label, mapPos);
         }
     }
 
@@ -233,13 +239,32 @@ public partial class RareBeastCounter
             (deltaZ - (delta.X + delta.Y)) * CameraAngleSin);
     }
 
+    private void DrawMapMarker(string text, Vector2 pos)
+    {
+        var ringColorValue = Settings.MapRender.Colors.MapMarkerRingColor.Value;
+        var layout = Settings.MapRender.Layout;
+        var ringColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
+            ringColorValue.R / 255f,
+            ringColorValue.G / 255f,
+            ringColorValue.B / 255f,
+            1f));
+        _mapDrawList.AddCircle(pos, layout.MapMarkerRingRadius.Value, ringColor, 24, layout.MapMarkerRingThickness.Value);
+
+        DrawMapLabel(text, pos, Settings.MapRender.Colors.MapMarkerTextColor.Value);
+    }
+
     private void DrawMapLabel(string text, Vector2 pos, Color color)
     {
         var size = ImGui.CalcTextSize(text);
         var half = size / 2f;
         var pad = new Vector2(4, 2);
+        var backgroundColor = Settings.MapRender.Colors.MapMarkerBackgroundColor.Value;
         _mapDrawList.AddRectFilled(pos - half - pad, pos + half + pad,
-            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0f, 0f, 0f, 0.7f)));
+            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
+                backgroundColor.R / 255f,
+                backgroundColor.G / 255f,
+                backgroundColor.B / 255f,
+                backgroundColor.A / 255f)));
         _mapDrawList.AddText(pos - half,
             ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(color.R / 255f, color.G / 255f, color.B / 255f, 1f)),
             text);
@@ -271,7 +296,7 @@ public partial class RareBeastCounter
                 ImGui.TableNextColumn();
                 ImGui.Text(_beastPrices.TryGetValue(beast.Name, out var price) && price >= 0 ? $"{price:0}c" : "?");
                 ImGui.TableNextColumn();
-                ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(GetBeastColor(beast.Name, beast.IsBeingCaptured)),
+                ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(GetTrackedWindowBeastColor(beast.IsBeingCaptured)),
                     GetDisplayedBeastLabel(beast.Name, beast.IsBeingCaptured));
             }
 
@@ -405,13 +430,51 @@ public partial class RareBeastCounter
         return entity.Buffs?.Find(b => b.Name == CaptureMonsterTrappedBuffName) != null;
     }
 
+    private bool TryGetBeastPriceText(string beastName, out string priceText)
+    {
+        if (_beastPrices.TryGetValue(beastName, out var price) && price >= 0)
+        {
+            priceText = $"{price.ToString("0", CultureInfo.InvariantCulture)}c";
+            return true;
+        }
+
+        priceText = null;
+        return false;
+    }
+
+    private void DrawOutlinedText(string text, Vector2 position, Color color)
+    {
+        var outlineColor = Settings.MapRender.Colors.WorldTextOutlineColor.Value;
+        Graphics.DrawText(text, position + new Vector2(-1, -1), outlineColor, FontAlign.Center);
+        Graphics.DrawText(text, position + new Vector2(-1, 1), outlineColor, FontAlign.Center);
+        Graphics.DrawText(text, position + new Vector2(1, -1), outlineColor, FontAlign.Center);
+        Graphics.DrawText(text, position + new Vector2(1, 1), outlineColor, FontAlign.Center);
+        Graphics.DrawText(text, position, color, FontAlign.Center);
+    }
+
+    private string GetMapMarkerLabel(string beastName, bool isBeingCaptured)
+    {
+        var displayName = GetDisplayedBeastLabel(beastName, isBeingCaptured);
+        if (Settings.MapRender.ShowNameInsteadOfPrice.Value)
+        {
+            return displayName;
+        }
+
+        return TryGetBeastPriceText(beastName, out var priceText)
+            ? $"{displayName} {priceText}"
+            : displayName;
+    }
+
     private static string GetDisplayedBeastLabel(string beastName, bool isBeingCaptured)
     {
         return isBeingCaptured ? $"{beastName}{CapturingSuffix}" : beastName;
     }
 
-    private static Color GetBeastColor(string _, bool isBeingCaptured = false) =>
-        isBeingCaptured ? CapturingColor : new Color(255, 165, 0, 255);
+    private Color GetWorldBeastColor(bool isBeingCaptured) =>
+        isBeingCaptured ? Settings.MapRender.Colors.WorldCapturedBeastColor.Value : Settings.MapRender.Colors.WorldBeastColor.Value;
+
+    private Color GetTrackedWindowBeastColor(bool isBeingCaptured) =>
+        isBeingCaptured ? Settings.MapRender.Colors.TrackedWindowCaptureColor.Value : Settings.MapRender.Colors.TrackedWindowBeastColor.Value;
 
     private static string GetTrackedBeastName(string metadata) =>
         TryGetValuableTrackedBeastName(metadata, out var name) ? name : null;

@@ -1,6 +1,7 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ExileCore;
@@ -19,32 +20,6 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private const string MapTimePrefix = "Map Time:";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
-    private static readonly string[] RedBeastMetadataPatterns =
-    [
-        // Craicic (The Deep) 9 beasts
-        "GemFrogBestiary", "CrabSpiderBestiary", "FrogBestiary", "SandSpitterBestiary", "CrabParasiteLargeBestiary",
-        "ShieldCrabBestiary", "SeaWitchSpawnBestiary", "ParasiticSquidBestiary", "SquidBestiary",
-
-        // Farric (The Wilds) 15 beasts
-        "TigerBestiary", "WolfBestiary", "LynxBestiary", "HellionBestiary", "HoundBestiary", "PitbullBestiary",
-        "BestiaryMonkeyChiefBlood", "BestiaryMonkey", "BestiarySpiker", "GoatmanLeapSlamBestiary", "BeastCaveBestiary",
-        "BestiaryBull", "DropBearBestiary", "MonkeyBloodBestiary", "PurgeHoundBestiary",
-
-        // Fenumal (The Caverns) 7 beasts
-        "SpiderPlatedBestiary", "SpiderPlagueBestiary", "RootSpiderBestiary", "InsectSpawnerBestiary", "Spider5Bestiary", "BlackScorpionBestiary",
-        "SandLeaperBestiary",
-
-        // Saqawine (The Sands) 7 beasts
-        "MarakethBirdBestiary", "VultureBestiary", "SnakeBestiary", "SnakeBestiary2", "KiwethBestiary", "RhoaBestiary", "IguanaBestiary",
-
-        // Spirit Bosses 4 beasts
-        "MarakethBirdSpiritBoss", "NessaCrabBestiarySpiritBoss", "TigerBestiarySpiritBoss", "SpiderPlatedBestiarySpiritBoss",
-
-        // Harvest & special 10 beasts
-        "HarvestBeastT3", "HarvestHellionT3", "HarvestBrambleHulkT3", "HarvestGoatmanT3", "HarvestRhexT3", "HarvestNessaCrabT3",
-        "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
-    ];
-
     private static readonly TrackedBeast[] AllRedBeasts =
     [
         // Craicic (The Deep)
@@ -126,12 +101,12 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     ];
 
     private readonly HashSet<long> _countedRareBeastIds = new();
-    private readonly HashSet<long> _sessionProcessedRareBeastIds = new();
     private readonly Dictionary<long, Entity> _trackedBeastEntities = new();
     private readonly Dictionary<string, int> _valuableBeastCounts = AllRedBeasts.ToDictionary(x => x.Name, _ => 0);
     private bool _analyticsCollapsed;
 
     private int _rareBeastsFound;
+    private int _sessionBeastsFound;
     private int _totalRedBeastsSession;
     private DateTime _sessionStartUtc;
     private TimeSpan _sessionPausedDuration = TimeSpan.Zero;
@@ -231,12 +206,13 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     public override void Render()
     {
-        ApplyPauseMenuTimerState(DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        ApplyPauseMenuTimerState(now);
         ApplyBestiaryClipboard();
 
         var autoRefreshMinutes = Settings.BeastPrices.AutoRefreshMinutes.Value;
         if (autoRefreshMinutes > 0 && !_isFetchingPrices &&
-            (DateTime.UtcNow - _lastPriceFetchAttempt).TotalMinutes >= autoRefreshMinutes)
+            (now - _lastPriceFetchAttempt).TotalMinutes >= autoRefreshMinutes)
         {
             Task.Run(FetchBeastPricesAsync);
         }
@@ -309,12 +285,13 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     private void DrawAnalyticsWindow()
     {
-        var allLines = BuildAnalyticsLines();
+        var includeBeastBreakdown = !_analyticsCollapsed;
+        var allLines = BuildAnalyticsLines(includeBeastBreakdown);
         if (allLines.Count == 0) return;
 
-        var displayText = _analyticsCollapsed
-            ? allLines[0].Trim()
-            : string.Join("\n", allLines);
+        var displayText = includeBeastBreakdown
+            ? string.Join("\n", allLines)
+            : allLines[0];
 
         var s = Settings.AnalyticsWindow;
         var windowRect = GameController.Window.GetWindowRectangle();
@@ -470,9 +447,25 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var enabled = Settings.BeastPrices.EnabledBeasts;
         if (enabled.Count == 0) return string.Empty;
 
-        return string.Join("|", AllRedBeasts
-            .Where(b => enabled.Contains(b.Name) && !string.IsNullOrEmpty(b.RegexFragment))
-            .Select(b => b.RegexFragment));
+        var enabledBeastSet = new HashSet<string>(enabled);
+        var builder = new StringBuilder();
+
+        foreach (var beast in AllRedBeasts)
+        {
+            if (!enabledBeastSet.Contains(beast.Name) || string.IsNullOrEmpty(beast.RegexFragment))
+            {
+                continue;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.Append('|');
+            }
+
+            builder.Append(beast.RegexFragment);
+        }
+
+        return builder.ToString();
     }
 
     private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns, string RegexFragment = "");

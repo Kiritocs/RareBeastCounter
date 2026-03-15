@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using ImGuiNET;
 
 namespace RareBeastCounter;
@@ -102,8 +102,8 @@ public partial class RareBeastCounter
         _sessionStartUtc = DateTime.UtcNow;
         _sessionPausedDuration = TimeSpan.Zero;
         _pauseMenuSessionStartUtc = null;
+        _sessionBeastsFound = 0;
         _totalRedBeastsSession = 0;
-        _sessionProcessedRareBeastIds.Clear();
 
         foreach (var tracked in AllRedBeasts)
         {
@@ -127,3 +127,5 @@ public partial class RareBeastCounter
         _completedMapCount = 0;
     }
 }
+
+

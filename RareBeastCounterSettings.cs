@@ -246,11 +246,73 @@ public class MapRenderSettings
     [Menu("Show Enabled Beasts Only", "Only highlight/display beasts that are checked in the Beast Picker.")]
     public ToggleNode ShowEnabledOnly { get; set; } = new(true);
 
-    [Menu("Show Name Instead Of Price", "Show the beast's name on map markers and inventory items instead of its chaos value.")]
+    [Menu("Show Name Instead Of Price", "Show the beast's name on map markers instead of appending its chaos value.")]
     public ToggleNode ShowNameInsteadOfPrice { get; set; } = new(false);
+
+    [Menu("Colors", "Color settings for world labels, map markers, and the tracked beasts window.")]
+    public MapRenderColorSettings Colors { get; set; } = new();
+
+    [Menu("Layout", "Size and spacing settings for world labels and map markers.")]
+    public MapRenderLayoutSettings Layout { get; set; } = new();
 
     [Menu("⚠ EXPLORATION ROUTE (DO NOT USE)", "Broken experimental pathfinding junk. Do not enable any of these unless you are actively debugging the route code.")]
     public ExplorationRouteSettings ExplorationRoute { get; set; } = new();
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class MapRenderColorSettings
+{
+    [Menu("World Beast Color", "Text and ground-circle color for tracked beasts in the world when they are not being captured.")]
+    public ColorNode WorldBeastColor { get; set; } = new(new Color(180, 20, 20, 255));
+
+    [Menu("World Captured Beast Color", "Text and ground-circle color for tracked beasts in the world when they are currently being captured.")]
+    public ColorNode WorldCapturedBeastColor { get; set; } = new(new Color(255, 40, 40, 255));
+
+    [Menu("World Price Text Color", "Price text color for tracked beasts in the world.")]
+    public ColorNode WorldPriceTextColor { get; set; } = new(new Color(255, 235, 120, 255));
+
+    [Menu("World Capture Text Color", "Color of the separate CAPTURING label text shown for beasts that are currently being captured.")]
+    public ColorNode WorldCaptureTextColor { get; set; } = new(new Color(255, 40, 40, 255));
+
+    [Menu("World Capture Ring Color", "Outer ring color for beasts that are currently being captured.")]
+    public ColorNode WorldCaptureRingColor { get; set; } = new(Color.White);
+
+    [Menu("World Text Outline Color", "Outline color used behind world text so it stays readable.")]
+    public ColorNode WorldTextOutlineColor { get; set; } = new(Color.Black);
+
+    [Menu("Map Marker Text Color", "Text color for large-map beast markers.")]
+    public ColorNode MapMarkerTextColor { get; set; } = new(new Color(180, 20, 20, 255));
+
+    [Menu("Map Marker Ring Color", "Ring color for large-map beast markers.")]
+    public ColorNode MapMarkerRingColor { get; set; } = new(new Color(180, 20, 20, 255));
+
+    [Menu("Map Marker Background Color", "Background color behind the large-map beast marker text.")]
+    public ColorNode MapMarkerBackgroundColor { get; set; } = new(new Color(0, 0, 0, 230));
+
+    [Menu("Tracked Window Beast Color", "Text color for normal beasts in the tracked beasts window.")]
+    public ColorNode TrackedWindowBeastColor { get; set; } = new(new Color(180, 20, 20, 255));
+
+    [Menu("Tracked Window Capture Color", "Text color for beasts that are being captured in the tracked beasts window.")]
+    public ColorNode TrackedWindowCaptureColor { get; set; } = new(new Color(255, 40, 40, 255));
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class MapRenderLayoutSettings
+{
+    [Menu("World Text Line Spacing", "Vertical spacing between world-label lines such as name, price, and capture text.")]
+    public RangeNode<float> WorldTextLineSpacing { get; set; } = new(18f, 8f, 40f);
+
+    [Menu("World Beast Circle Radius", "Ground-circle radius for tracked beasts in the world.")]
+    public RangeNode<float> WorldBeastCircleRadius { get; set; } = new(80f, 20f, 200f);
+
+    [Menu("World Capture Ring Radius", "Highlight-ring radius for beasts that are currently being captured.")]
+    public RangeNode<float> WorldCaptureRingRadius { get; set; } = new(68f, 20f, 200f);
+
+    [Menu("Map Marker Ring Radius", "Ring radius for large-map beast markers.")]
+    public RangeNode<float> MapMarkerRingRadius { get; set; } = new(20f, 5f, 80f);
+
+    [Menu("Map Marker Ring Thickness", "Ring thickness for large-map beast markers.")]
+    public RangeNode<float> MapMarkerRingThickness { get; set; } = new(3f, 1f, 10f);
 }
 
 [Submenu(CollapsedByDefault = true)]
