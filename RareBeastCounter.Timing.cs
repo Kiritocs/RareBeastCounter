@@ -105,7 +105,7 @@ public partial class RareBeastCounter
         _totalRedBeastsSession = 0;
         _sessionProcessedRareBeastIds.Clear();
 
-        foreach (var tracked in ValuableTrackedBeasts)
+        foreach (var tracked in AllRedBeasts)
         {
             _valuableBeastCounts[tracked.Name] = 0;
         }

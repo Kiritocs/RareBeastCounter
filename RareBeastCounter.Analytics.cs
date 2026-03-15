@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using ExileCore.PoEMemory.MemoryObjects;
 
 namespace RareBeastCounter;
@@ -89,7 +90,7 @@ public partial class RareBeastCounter
             return false;
         }
 
-        foreach (var tracked in ValuableTrackedBeasts)
+        foreach (var tracked in AllRedBeasts)
         {
             foreach (var pattern in tracked.MetadataPatterns)
             {
@@ -106,7 +107,7 @@ public partial class RareBeastCounter
 
     private List<string> BuildAnalyticsLines()
     {
-        var lines = new List<string>(4 + ValuableTrackedBeasts.Length);
+        var lines = new List<string>(4 + AllRedBeasts.Length);
         var now = DateTime.UtcNow;
 
         var currentMapTime = _currentMapElapsed;
@@ -138,7 +139,7 @@ public partial class RareBeastCounter
         var denominator = _totalRedBeastsSession;
         var denominatorText = denominator.ToString("N0", CultureInfo.InvariantCulture);
 
-        foreach (var tracked in ValuableTrackedBeasts)
+        foreach (var tracked in AllRedBeasts.Where(b => Settings.BeastPrices.EnabledBeasts.Contains(b.Name)))
         {
             var count = _valuableBeastCounts[tracked.Name];
             var countText = count.ToString("N0", CultureInfo.InvariantCulture);
@@ -147,6 +148,7 @@ public partial class RareBeastCounter
             var freqText = count > 0
                 ? $"1 every ~{(denominator / (double)count).ToString("0", CultureInfo.InvariantCulture)} reds"
                 : "no sightings yet";
+
             lines.Add($"{tracked.Name}: {countText} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({freqText})");
         }
 

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using ExileCore;
 using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.MemoryObjects;
@@ -44,26 +45,90 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         "HarvestVultureParasiteT3", "HarvestSquidT3", "HarvestPlatedScorpionT3", "GullGoliathBestiary"
     ];
 
-    private static readonly TrackedBeast[] ValuableTrackedBeasts =
+    private static readonly TrackedBeast[] AllRedBeasts =
     [
+        // Craicic (The Deep)
+        new("Craicic Chimeral",      ["GemFrogBestiary"]),
+        new("Craicic Spider Crab",   ["CrabSpiderBestiary"]),
+        new("Craicic Maw",           ["FrogBestiary"]),
+        new("Craicic Sand Spitter",  ["SandSpitterBestiary"]),
+        new("Craicic Savage Crab",   ["CrabParasiteLargeBestiary"]),
+        new("Craicic Shield Crab",   ["ShieldCrabBestiary"]),
+        new("Craicic Squid",         ["SeaWitchSpawnBestiary"]),
+        new("Craicic Vassal",        ["ParasiticSquidBestiary"]),
+        new("Craicic Watcher",       ["SquidBestiary"]),
+
+        // Farric (The Wilds) — Chieftain must precede Ape so "BestiaryMonkey" substring matches correctly
+        new("Farric Tiger Alpha",        ["TigerBestiary"]),
+        new("Farric Wolf Alpha",         ["WolfBestiary"]),
+        new("Farric Lynx Alpha",         ["LynxBestiary"]),
+        new("Farric Flame Hellion Alpha",["HellionBestiary"]),
+        new("Farric Magma Hound",        ["HoundBestiary"]),
+        new("Farric Pit Hound",          ["PitbullBestiary"]),
+        new("Farric Chieftain",          ["BestiaryMonkeyChiefBlood"]),
+        new("Farric Ape",                ["BestiaryMonkey", "MonkeyBloodBestiary"]),
+        new("Farric Goliath",            ["BestiarySpiker"]),
+        new("Farric Goatman",            ["GoatmanLeapSlamBestiary"]),
+        new("Farric Gargantuan",         ["BeastCaveBestiary"]),
+        new("Farric Taurus",             ["BestiaryBull"]),
+        new("Farric Ursa",               ["DropBearBestiary"]),
+        new("Vicious Hound",             ["PurgeHoundBestiary"]),
+
+        // Fenumal (The Caverns)
+        new("Fenumal Hybrid Arachnid",  ["SpiderPlatedBestiary"]),
+        new("Fenumal Plagued Arachnid", ["SpiderPlagueBestiary"]),
+        new("Fenumal Devourer",         ["RootSpiderBestiary"]),
+        new("Fenumal Queen",            ["InsectSpawnerBestiary"]),
+        new("Fenumal Widow",            ["Spider5Bestiary"]),
+        new("Fenumal Scorpion",         ["BlackScorpionBestiary"]),
+        new("Fenumal Scrabbler",        ["SandLeaperBestiary"]),
+
+        // Saqawine (The Sands)
+        new("Saqawine Rhex",        ["MarakethBirdBestiary"]),
+        new("Saqawine Vulture",     ["VultureBestiary"]),
+        new("Saqawine Cobra",       ["SnakeBestiary"]),
+        new("Saqawine Blood Viper", ["SnakeBestiary2"]),
+        new("Saqawine Retch",       ["KiwethBestiary"]),
+        new("Saqawine Rhoa",        ["RhoaBestiary"]),
+        new("Saqawine Chimeral",    ["IguanaBestiary"]),
+
+        // Spirit Bosses
+        new("Saqawal, First of the Sky",    ["MarakethBirdSpiritBoss"]),
+        new("Craiceann, First of the Deep", ["NessaCrabBestiarySpiritBoss"]),
         new("Farrul, First of the Plains",  ["TigerBestiarySpiritBoss"]),
         new("Fenumus, First of the Night",  ["SpiderPlatedBestiarySpiritBoss"]),
 
-        new("Vivid Vulture",       ["HarvestVultureParasiteT3"]),
-        new("Wild Bristle Matron", ["HarvestBeastT3"]),
-        new("Wild Hellion Alpha",  ["HarvestHellionT3"]),
-        new("Wild Brambleback",    ["HarvestBrambleHulkT3"]),
+        // Harvest T3 & special
+        new("Wild Bristle Matron",  ["HarvestBeastT3"]),
+        new("Wild Hellion Alpha",   ["HarvestHellionT3"]),
+        new("Wild Brambleback",     ["HarvestBrambleHulkT3"]),
+        new("Primal Cystcaller",    ["HarvestGoatmanT3"]),
+        new("Primal Rhex Matriarch",["HarvestRhexT3"]),
+        new("Primal Crushclaw",     ["HarvestNessaCrabT3"]),
+        new("Vivid Vulture",        ["HarvestVultureParasiteT3"]),
+        new("Vivid Watcher",        ["HarvestSquidT3"]),
+        new("Vivid Abberarach",     ["HarvestPlatedScorpionT3"]),
+        new("Black Mórrigan",       ["GullGoliathBestiary", "Morrigan"]),
+    ];
 
-        new("Craicic Chimeral",         ["GemFrogBestiary"]),
-        new("Fenumal Plagued Arachnid", ["SpiderPlagueBestiary"]),
-
-        new("Vicious Hound",  ["ViciousHound", "PitbullBestiary"]),
-        new("Black Mórrigan", ["GullGoliathBestiary", "Morrigan"]),
+    private static readonly string[] DefaultEnabledBeasts =
+    [
+        "Farrul, First of the Plains",
+        "Fenumus, First of the Night",
+        "Vivid Vulture",
+        "Wild Bristle Matron",
+        "Wild Hellion Alpha",
+        "Wild Brambleback",
+        "Craicic Chimeral",
+        "Fenumal Plagued Arachnid",
+        "Vicious Hound",
+        "Black Mórrigan",
     ];
 
     private readonly HashSet<long> _countedRareBeastIds = new();
     private readonly HashSet<long> _sessionProcessedRareBeastIds = new();
-    private readonly Dictionary<string, int> _valuableBeastCounts = ValuableTrackedBeasts.ToDictionary(x => x.Name, _ => 0);
+    private readonly Dictionary<long, Entity> _trackedBeastEntities = new();
+    private readonly Dictionary<string, int> _valuableBeastCounts = AllRedBeasts.ToDictionary(x => x.Name, _ => 0);
     private bool _analyticsCollapsed;
 
     private int _rareBeastsFound;
@@ -100,6 +165,16 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         Settings.AnalyticsWindow.ResetSession.OnPressed = ResetSessionAnalytics;
         Settings.AnalyticsWindow.SaveSessionToFile.OnPressed = SaveSessionSnapshotToFile;
+        Settings.BeastPrices.FetchPrices.OnPressed = async () => await FetchBeastPricesAsync();
+        Settings.BeastPrices.BeastPickerPanel.DrawDelegate = DrawBeastPickerPanel;
+
+        if (Settings.BeastPrices.EnabledBeasts.Count == 0)
+        {
+            foreach (var name in DefaultEnabledBeasts)
+                Settings.BeastPrices.EnabledBeasts.Add(name);
+        }
+
+        Task.Run(FetchBeastPricesAsync);
     }
 
     public override void AreaChange(AreaInstance area)
@@ -108,6 +183,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var newAreaHash = RareBeastCounterHelpers.TryGetAreaHashText(area);
         var newAreaTrackable = area is { IsTown: false, IsHideout: false };
 
+        _trackedBeastEntities.Clear();
         PauseCurrentMapTimer(now);
 
         if (!newAreaTrackable)
@@ -136,17 +212,39 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     public override void EntityAdded(Entity entity)
     {
-        if (IsRareBeast(entity) && _countedRareBeastIds.Add(entity.Id))
+        if (!IsRareBeast(entity)) return;
+        _trackedBeastEntities[entity.Id] = entity;
+        if (_countedRareBeastIds.Add(entity.Id))
         {
             _rareBeastsFound++;
             RegisterSessionRareBeast(entity);
         }
     }
 
+    public override void EntityRemoved(Entity entity)
+    {
+        _trackedBeastEntities.Remove(entity.Id);
+    }
+
     public override void Render()
     {
         ApplyPauseMenuTimerState(DateTime.UtcNow);
         ApplyBestiaryClipboard();
+
+        var autoRefreshMinutes = Settings.BeastPrices.AutoRefreshMinutes.Value;
+        if (autoRefreshMinutes > 0 && !_isFetchingPrices &&
+            (DateTime.UtcNow - _lastPriceFetchAttempt).TotalMinutes >= autoRefreshMinutes)
+        {
+            Task.Run(FetchBeastPricesAsync);
+        }
+
+        if (Settings.MapRender.ShowBeastLabelsInWorld.Value) DrawInWorldBeasts();
+        if (Settings.MapRender.ShowBeastsOnMap.Value) DrawBeastsOnLargeMap();
+        if (Settings.MapRender.ShowTrackedBeastsWindow.Value) DrawTrackedBeastsWindow();
+        if (Settings.MapRender.ShowPricesInInventory.Value) DrawInventoryBeasts();
+        if (Settings.MapRender.ShowPricesInStash.Value) DrawStashBeasts();
+        DrawMerchantBeasts();
+        if (Settings.MapRender.ShowPricesInBestiary.Value) DrawBestiaryPanelPrices();
 
         var shouldRenderCounterAndMessage = ShouldRenderCounterAndMessageOverlays();
         var shouldRenderAnalytics = ShouldRenderAnalyticsOverlay();

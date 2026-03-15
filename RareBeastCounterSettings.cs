@@ -1,6 +1,8 @@
+using System.Collections.Generic;
 using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
+using Newtonsoft.Json;
 using SharpDX;
 
 namespace RareBeastCounter;
@@ -24,6 +26,12 @@ public class RareBeastCounterSettings : ISettings
 
     [Menu("Analytics Window", "Separate window for map/session timing and valuable beast spawn analytics.")]
     public AnalyticsWindowSettings AnalyticsWindow { get; set; } = new();
+
+    [Menu("Map & World Render", "Settings for marking beasts on map, in world, and in UI panels.")]
+    public MapRenderSettings MapRender { get; set; } = new();
+
+    [Menu("Beast Prices", "Settings for fetching beast prices from poe.ninja.")]
+    public BeastPricesSettings BeastPrices { get; set; } = new();
 
     [Menu("Bestiary Clipboard", "Auto-copy a regex to clipboard when the Bestiary tab is opened.")]
     public BestiaryClipboardSettings BestiaryClipboard { get; set; } = new();
@@ -179,6 +187,26 @@ public class AnalyticsWindowSettings
 }
 
 [Submenu(CollapsedByDefault = true)]
+public class BeastPricesSettings
+{
+    [Menu("League", "The league name to fetch prices for (e.g. Mirage).")]
+    public TextNode League { get; set; } = new("Mirage");
+
+    [Menu("Auto-Refresh (minutes)", "Re-fetch prices automatically every N minutes. Set to 0 to disable.")]
+    public RangeNode<int> AutoRefreshMinutes { get; set; } = new(10, 0, 60);
+
+    [Menu("Fetch Prices", "Manually fetch current beast prices from poe.ninja.")]
+    public ButtonNode FetchPrices { get; set; } = new();
+
+    public string LastUpdated { get; set; } = "never";
+
+    public HashSet<string> EnabledBeasts { get; set; } = new();
+
+    [Menu("Beast Picker", "Select which beasts to show in the analytics window.")]
+    [JsonIgnore] public CustomNode BeastPickerPanel { get; set; } = new();
+}
+
+[Submenu(CollapsedByDefault = true)]
 public class BestiaryClipboardSettings
 {
     [Menu("Enable Auto-Copy", "Automatically copy the regex to clipboard when the Bestiary tab becomes visible.")]
@@ -186,4 +214,29 @@ public class BestiaryClipboardSettings
 
     [Menu("Beast Regex", "Regex copied to clipboard when the Bestiary tab opens.")]
     public TextNode BeastRegex { get; set; } = new("id v|le m|ld h|s ho|k m|an fi|ul, f|cic c|nd sc|s, f|d bra|l pla|n, f|l cru| cy");
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class MapRenderSettings
+{
+    [Menu("Show Beast Labels In World", "Draw beast name and a highlight circle on entities currently detected by ExileAPI in the game world.")]
+    public ToggleNode ShowBeastLabelsInWorld { get; set; } = new(true);
+
+    [Menu("Show Beasts On Large Map", "Draw name/price markers for beasts currently detected by ExileAPI on the large map.")]
+    public ToggleNode ShowBeastsOnMap { get; set; } = new(true);
+
+    [Menu("Show Tracked Beasts Window", "Show a floating window listing beasts currently detected by ExileAPI and their prices.")]
+    public ToggleNode ShowTrackedBeastsWindow { get; set; } = new(true);
+
+    [Menu("Show Prices In Inventory", "Overlay beast prices on captured monster items in the player inventory.")]
+    public ToggleNode ShowPricesInInventory { get; set; } = new(true);
+
+    [Menu("Show Prices In Stash", "Overlay beast prices on captured monster items in the stash.")]
+    public ToggleNode ShowPricesInStash { get; set; } = new(true);
+
+    [Menu("Show Prices In Bestiary", "Overlay beast prices in the Bestiary captured-beasts panel.")]
+    public ToggleNode ShowPricesInBestiary { get; set; } = new(true);
+
+    [Menu("Show Enabled Beasts Only", "Only highlight/display beasts that are checked in the Beast Picker.")]
+    public ToggleNode ShowEnabledOnly { get; set; } = new(true);
 }
