@@ -155,6 +155,9 @@ public class AnalyticsWindowSettings
     [Menu("Reset Session", "Reset current analytics session counters and timers (hold Shift while pressing).")]
     public ButtonNode ResetSession { get; set; } = new();
 
+    [Menu("Reset Map Average", "Reset only the completed-map average counters (map count and total duration). Hold Shift while pressing.")]
+    public ButtonNode ResetMapAverage { get; set; } = new();
+
     [Menu("Save Session To File", "Save the current session snapshot to a CSV file.")]
     public ButtonNode SaveSessionToFile { get; set; } = new();
 
@@ -212,7 +215,10 @@ public class BestiaryClipboardSettings
     [Menu("Enable Auto-Copy", "Automatically copy the regex to clipboard when the Bestiary tab becomes visible.")]
     public ToggleNode EnableAutoCopy { get; set; } = new(true);
 
-    [Menu("Beast Regex", "Regex copied to clipboard when the Bestiary tab opens.")]
+    [Menu("Auto-Generate Regex", "Build the regex automatically from the beasts selected in Beast Prices instead of using the manual field.")]
+    public ToggleNode UseAutoRegex { get; set; } = new(true);
+
+    [Menu("Beast Regex", "Regex copied to clipboard when Auto-Generate is off.")]
     public TextNode BeastRegex { get; set; } = new("id v|le m|ld h|s ho|k m|an fi|ul, f|cic c|nd sc|s, f|d bra|l pla|n, f|l cru| cy");
 }
 
@@ -239,4 +245,26 @@ public class MapRenderSettings
 
     [Menu("Show Enabled Beasts Only", "Only highlight/display beasts that are checked in the Beast Picker.")]
     public ToggleNode ShowEnabledOnly { get; set; } = new(true);
+
+    [Menu("Show Name Instead Of Price", "Show the beast's name on map markers and inventory items instead of its chaos value.")]
+    public ToggleNode ShowNameInsteadOfPrice { get; set; } = new(false);
+
+    [Menu("⚠ EXPLORATION ROUTE (DO NOT USE)", "Broken experimental pathfinding junk. Do not enable any of these unless you are actively debugging the route code.")]
+    public ExplorationRouteSettings ExplorationRoute { get; set; } = new();
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class ExplorationRouteSettings
+{
+    [Menu("⛔ Show Exploration Route", "DO NOT USE. Broken test overlay. Draws a coverage path on the large map. Never enable this in normal play.")]
+    public ToggleNode ShowExplorationRoute { get; set; } = new(false);
+
+    [Menu("⛔ Route Detection Radius (grid units)", "DO NOT USE. Test-only value that drives waypoint spacing and the yellow radius circle.")]
+    public RangeNode<int> DetectionRadius { get; set; } = new(186, 20, 500);
+
+    [Menu("⛔ Waypoint Auto-Visit Radius (grid units)", "DO NOT USE. Test-only value — distance at which a waypoint is marked visited.")]
+    public RangeNode<int> WaypointVisitRadius { get; set; } = new(35, 5, 200);
+
+    [Menu("⛔ Show Path To Next Waypoint (Radar)", "DO NOT USE. Test-only Radar A* path to the next exploration waypoint.")]
+    public ToggleNode ShowPathsToBeasts { get; set; } = new(false);
 }

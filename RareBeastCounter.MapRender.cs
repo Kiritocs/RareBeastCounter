@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements.InventoryElements;
 using ExileCore.Shared.Enums;
+using GameOffsets.Native;
 using ImGuiNET;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
@@ -25,7 +28,90 @@ public partial class RareBeastCounter
     private RectangleF _mapRect;
     private ImDrawListPtr _mapDrawList;
 
-    // ── In-world labels & circles ────────────────────────────────────────────
+    private CancellationTokenSource _pathFindingCts = new();
+    private volatile List<Vector2i> _explorationPath;
+    private int _explorationPathForIdx = -1;
+
+    private void RequestExplorationPath(int waypointIdx, Vector2 gridPos)
+    {
+        var lookForRoute = GameController.PluginBridge
+            .GetMethod<Func<Vector2, Action<List<Vector2i>>, CancellationToken, Task>>("Radar.LookForRoute");
+        if (lookForRoute == null) return;
+
+        var token = _pathFindingCts.Token;
+        _ = lookForRoute(gridPos, path =>
+        {
+            if (path != null && !token.IsCancellationRequested && _explorationPathForIdx == waypointIdx)
+                _explorationPath = path;
+        }, token);
+    }
+
+    internal void CancelBeastPaths()
+    {
+        _pathFindingCts.Cancel();
+        _pathFindingCts = new CancellationTokenSource();
+        _explorationPath = null;
+        _explorationPathForIdx = -1;
+    }
+
+    private void DrawPathsToBeasts(Vector2 mapCenter)
+    {
+        EnsureExplorationRouteIsCurrent();
+
+        if (_explorationRoute.Count == 0) return;
+
+        var player = GameController.Game.IngameState.Data.LocalPlayer;
+        var playerPositioned = player?.GetComponent<Positioned>();
+        if (playerPositioned == null) return;
+
+        var playerGridPos = new Vector2(playerPositioned.GridPosNum.X, playerPositioned.GridPosNum.Y);
+        UpdateVisitedWaypoints(playerGridPos);
+        var nextIdx = GetNextWaypointIndex();
+        if (nextIdx < 0) return;
+
+        if (nextIdx != _explorationPathForIdx)
+        {
+            _explorationPathForIdx = nextIdx;
+            _explorationPath = null;
+            RequestExplorationPath(nextIdx, _explorationRoute[nextIdx]);
+        }
+
+        var dotCol  = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 0.8f, 1f,  0.45f));
+        var nextCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f,   0.65f, 0f, 1f));
+
+        for (var i = 0; i < _explorationRoute.Count; i++)
+        {
+            if (_visitedWaypointIndices.Contains(i)) continue;
+            var wPos = mapCenter + TranslateGridDeltaToMapDelta(_explorationRoute[i] - playerGridPos, 0);
+            _mapDrawList.AddCircleFilled(wPos, i == nextIdx ? 5f : 2f, i == nextIdx ? nextCol : dotCol);
+        }
+
+        var path = _explorationPath;
+        if (path == null) return;
+
+        var playerRender = player?.GetComponent<ExileCore.PoEMemory.Components.Render>();
+        if (playerRender == null) return;
+        var playerHeight = -playerRender.RenderStruct.Height;
+        var heightData = GameController.IngameState.Data.RawTerrainHeightData;
+        var pathCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f, 0.65f, 0f, 0.85f));
+
+        Vector2? prev = null;
+        var skip = 0;
+        foreach (var node in path)
+        {
+            if (++skip % 2 != 0) continue;
+            float nodeHeight = 0;
+            if (heightData != null && node.Y >= 0 && node.Y < heightData.Length &&
+                node.X >= 0 && node.X < heightData[node.Y].Length)
+                nodeHeight = heightData[node.Y][node.X];
+
+            var pos = mapCenter + TranslateGridDeltaToMapDelta(
+                new Vector2(node.X, node.Y) - playerGridPos, playerHeight + nodeHeight);
+            if (prev.HasValue)
+                _mapDrawList.AddLine(prev.Value, pos, pathCol, 2f);
+            prev = pos;
+        }
+    }
 
     private void DrawInWorldBeasts()
     {
@@ -49,8 +135,6 @@ public partial class RareBeastCounter
             DrawFilledCircleInWorld(worldPos, 50, color);
         }
     }
-
-    // ── Large-map markers ────────────────────────────────────────────────────
 
     private void DrawBeastsOnLargeMap()
     {
@@ -77,7 +161,12 @@ public partial class RareBeastCounter
         if (largeMap.IsVisible)
         {
             _mapScale = largeMap.MapScale;
-            DrawBeastMarkersOnMap(largeMap.MapCenter);
+            if (Settings.MapRender.ShowBeastsOnMap.Value)
+                DrawBeastMarkersOnMap(largeMap.MapCenter);
+            if (Settings.MapRender.ExplorationRoute.ShowPathsToBeasts.Value)
+                DrawPathsToBeasts(largeMap.MapCenter);
+            if (Settings.MapRender.ExplorationRoute.ShowExplorationRoute.Value)
+                DrawExplorationRouteOnMap(largeMap.MapCenter);
         }
 
         ImGui.End();
@@ -117,9 +206,10 @@ public partial class RareBeastCounter
                 playerHeight + beastHeight);
             var mapPos = mapCenter + mapDelta;
 
-            var label = _beastPrices.TryGetValue(beastName, out var price) && price >= 0
-                ? $"{price:0}c"
-                : beastName;
+            var showName = Settings.MapRender.ShowNameInsteadOfPrice.Value;
+            var label = showName
+                ? beastName
+                : (_beastPrices.TryGetValue(beastName, out var price) && price >= 0 ? $"{price:0}c" : beastName);
 
             DrawMapLabel(label, mapPos, GetBeastColor(beastName));
         }
@@ -144,8 +234,6 @@ public partial class RareBeastCounter
             ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(color.R / 255f, color.G / 255f, color.B / 255f, 1f)),
             text);
     }
-
-    // ── Floating tracker window ──────────────────────────────────────────────
 
     private void DrawTrackedBeastsWindow()
     {
@@ -181,8 +269,6 @@ public partial class RareBeastCounter
 
         ImGui.End();
     }
-
-    // ── Inventory / stash / merchant price overlays ─────────────────────────
 
     private void DrawInventoryBeasts()
     {
@@ -235,8 +321,6 @@ public partial class RareBeastCounter
         }
     }
 
-    // ── Bestiary panel price overlay ─────────────────────────────────────────
-
     private void DrawBestiaryPanelPrices()
     {
         var ui = GameController.IngameState.IngameUi;
@@ -285,8 +369,6 @@ public partial class RareBeastCounter
         }
     }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
     private void DrawFilledCircleInWorld(Vector3 position, float radius, Color color)
     {
         var pts = new List<Vector2>();
@@ -307,15 +389,7 @@ public partial class RareBeastCounter
         Graphics.DrawPolyLine(pts.ToArray(), color, 2);
     }
 
-    private static Color GetBeastColor(string name) => name switch
-    {
-        _ when name.Contains("Vivid")  => new Color(255, 250, 0),
-        _ when name.Contains("Wild")   => new Color(255, 0, 235),
-        _ when name.Contains("Primal") => new Color(0, 245, 255),
-        _ when name.Contains("Black")  => Color.White,
-        _ when name.Contains("First")  => new Color(255, 140, 0),
-        _                              => Color.Red,
-    };
+    private static Color GetBeastColor(string _) => new(255, 165, 0, 255);
 
     private static string GetTrackedBeastName(string metadata) =>
         TryGetValuableTrackedBeastName(metadata, out var name) ? name : null;

@@ -115,4 +115,15 @@ public partial class RareBeastCounter
         _currentMapElapsed = TimeSpan.Zero;
         _currentMapStartUtc = _isCurrentAreaTrackable ? DateTime.UtcNow : null;
     }
+
+    private void ResetMapAverageAnalytics()
+    {
+        if (!ImGui.GetIO().KeyShift)
+        {
+            return;
+        }
+
+        _completedMapsDuration = TimeSpan.Zero;
+        _completedMapCount = 0;
+    }
 }
