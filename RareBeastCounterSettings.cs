@@ -31,7 +31,7 @@ public class RareBeastCounterSettings : ISettings
     public BestiaryClipboardSettings BestiaryClipboard { get; set; } = new();
 }
 
-[Submenu(CollapsedByDefault = false)]
+[Submenu(CollapsedByDefault = true)]
 public class VisibilitySettings
 {
     [Menu("Hide Counter & Message In Hideout", "Hide the main counter and completed message while inside a hideout.")]
@@ -53,7 +53,7 @@ public class VisibilitySettings
     public ToggleNode HideAnalyticsOnOpenRightPanel { get; set; } = new(true);
 }
 
-[Submenu(CollapsedByDefault = false)]
+[Submenu(CollapsedByDefault = true)]
 public class CounterWindowSettings
 {
     [Menu("X Position (%)", "Horizontal position of the main counter window.")]
@@ -90,7 +90,7 @@ public class CounterWindowSettings
     public CompletedMessageWindowSettings CompletedMessage { get; set; } = new();
 }
 
-[Submenu(CollapsedByDefault = false)]
+[Submenu(CollapsedByDefault = true)]
 public class CompletedCounterSettings
 {
     [Menu("Show While Not Complete", "Testing mode: use completed counter style even before all beasts are found.")]
@@ -106,7 +106,7 @@ public class CompletedCounterSettings
     public ColorNode BorderColor { get; set; } = new(new Color(90, 255, 120, 255));
 }
 
-[Submenu(CollapsedByDefault = false)]
+[Submenu(CollapsedByDefault = true)]
 public class CompletedMessageWindowSettings
 {
     [Menu("Show", "Show or hide the separate completed message window.")]
@@ -146,7 +146,7 @@ public class CompletedMessageWindowSettings
     public ColorNode BackgroundColor { get; set; } = new(new Color(0, 0, 0, 200));
 }
 
-[Submenu(CollapsedByDefault = false)]
+[Submenu(CollapsedByDefault = true)]
 public class AnalyticsWindowSettings
 {
     [Menu("Show", "Show or hide the analytics window.")]
