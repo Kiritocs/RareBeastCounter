@@ -47,13 +47,43 @@ public partial class RareBeastCounter
     {
         _sessionBeastsFound++;
 
-        if (!TryGetValuableTrackedBeastName(entity.Metadata, out var beastName))
+        if (!TryGetTrackedBeastNameCached(entity.Metadata, out var beastName))
         {
             return;
         }
 
         _totalRedBeastsSession++;
         _valuableBeastCounts[beastName]++;
+    }
+
+    private bool TryGetTrackedBeastNameCached(string metadata, out string beastName)
+    {
+        beastName = null;
+
+        if (string.IsNullOrWhiteSpace(metadata))
+        {
+            return false;
+        }
+
+        if (_trackedBeastNameCache.TryGetValue(metadata, out var cachedName))
+        {
+            if (cachedName == MissingTrackedBeastName)
+            {
+                return false;
+            }
+
+            beastName = cachedName;
+            return true;
+        }
+
+        if (TryGetValuableTrackedBeastName(metadata, out beastName))
+        {
+            _trackedBeastNameCache[metadata] = beastName;
+            return true;
+        }
+
+        _trackedBeastNameCache[metadata] = MissingTrackedBeastName;
+        return false;
     }
 
     private static bool TryGetValuableTrackedBeastName(string metadata, out string beastName)
@@ -65,15 +95,12 @@ public partial class RareBeastCounter
             return false;
         }
 
-        foreach (var tracked in AllRedBeasts)
+        foreach (var (pattern, trackedBeastName) in TrackedBeastMetadataLookup)
         {
-            foreach (var pattern in tracked.MetadataPatterns)
+            if (metadata.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
             {
-                if (metadata.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    beastName = tracked.Name;
-                    return true;
-                }
+                beastName = trackedBeastName;
+                return true;
             }
         }
 
@@ -121,10 +148,9 @@ public partial class RareBeastCounter
         var denominator = _totalRedBeastsSession;
         var denominatorText = denominator.ToString("N0", CultureInfo.InvariantCulture);
 
-        var enabledBeastSet = new HashSet<string>(enabledBeasts);
         foreach (var tracked in AllRedBeasts)
         {
-            if (!enabledBeastSet.Contains(tracked.Name))
+            if (!enabledBeasts.Contains(tracked.Name))
             {
                 continue;
             }

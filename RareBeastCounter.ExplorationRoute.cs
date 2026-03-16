@@ -11,10 +11,15 @@ public partial class RareBeastCounter
 {
     // ── Exploration route ────────────────────────────────────────────────────
 
+    private static readonly Vector2[] RadiusCirclePoints = RareBeastCounterHelpers.CreateUnitCirclePoints(48);
     private List<Vector2> _explorationRoute = new();
     private readonly HashSet<int> _visitedWaypointIndices = new();
     private bool _routeNeedsRegen = true;
     private int _lastRouteDetectionRadius = -1;
+    private readonly record struct RouteBounds(int MinX, int MinY, int MaxX, int MaxY)
+    {
+        public bool IsEmpty => MaxX < MinX || MaxY < MinY;
+    }
 
     internal int GetNextWaypointIndex()
     {
@@ -58,16 +63,13 @@ public partial class RareBeastCounter
 
         if (unvisited.Count == 0) return;
 
-        var pathData = GameController?.IngameState?.Data?.RawPathfindingData;
-        var sorted = BuildCoverageRoute(unvisited, playerGridPos, pathData);
+        var sorted = BuildCoverageRoute(unvisited, playerGridPos);
 
-        // Rebuild: visited waypoints keep their leading positions; unvisited follow in new order.
         _explorationRoute = visited.Concat(sorted).ToList();
         _visitedWaypointIndices.Clear();
         for (var i = 0; i < visited.Count; i++)
             _visitedWaypointIndices.Add(i);
 
-        // Invalidate the cached Radar path so it is immediately re-requested for the new next waypoint.
         CancelBeastPaths();
     }
 
@@ -82,173 +84,368 @@ public partial class RareBeastCounter
         var areaDimensions = GameController?.IngameState?.Data?.AreaDimensions;
         if (areaDimensions == null) return;
 
+        var positioned = GameController?.Game?.IngameState?.Data?.LocalPlayer?.GetComponent<Positioned>();
+        if (positioned == null) return;
+
+        var playerPos = new Vector2(positioned.GridPosNum.X, positioned.GridPosNum.Y);
         var maxX = areaDimensions.Value.X;
         var maxY = Math.Min(pathData.Length, areaDimensions.Value.Y);
 
-        var r = Math.Min(Settings.MapRender.ExplorationRoute.DetectionRadius.Value, Math.Min(maxX, maxY) / 4);
-        if (r < 4) return;
+        var detectionRadius = Math.Min(
+            Settings.MapRender.ExplorationRoute.DetectionRadius.Value,
+            Math.Min(maxX, maxY) / 4);
+        if (detectionRadius < 4) return;
 
-        Vector2? playerPos = null;
-        var positioned = GameController?.Game?.IngameState?.Data?.LocalPlayer?.GetComponent<Positioned>();
-        if (positioned != null)
-            playerPos = new Vector2(positioned.GridPosNum.X, positioned.GridPosNum.Y);
-
+        var routeStep = Math.Max(8, (int)(detectionRadius * 0.85f));
+        var searchRadius = Math.Max(routeStep, detectionRadius);
         var outsideBlockedMask = BuildOutsideBlockedMask(pathData, maxX, maxY);
-        var baseStep = Math.Max(4, (int)(r * 0.9f));
 
-        List<Vector2> candidates = null;
-        foreach (var step in new[] { baseStep, Math.Max(4, (int)(r * 2f / 3f)), Math.Max(4, r / 2) }.Distinct())
+        if (!TryFindNearestWalkableCell(pathData, maxX, maxY, (int)playerPos.X, (int)playerPos.Y, searchRadius, out var startCell))
         {
-            candidates = CollectCandidates(pathData, outsideBlockedMask, maxX, maxY, r, step);
-            if (candidates.Count >= 8) break;
+            return;
         }
 
-        if (candidates is { Count: > 0 })
+        var reachableMask = BuildReachableMask(pathData, maxX, maxY, startCell.x, startCell.y, out var reachableBounds);
+        if (reachableBounds.IsEmpty)
         {
-            // Drop waypoints in areas not reachable from the player's starting position
-            // (e.g. isolated corner enclosures that are walkable but disconnected).
-            if (playerPos.HasValue)
-                candidates = FilterToReachableComponent(candidates, playerPos.Value, pathData, baseStep);
+            return;
+        }
 
-            if (playerPos.HasValue)
-                TryAddPlayerAnchorCandidate(candidates, playerPos.Value, pathData, outsideBlockedMask, r);
+        var candidates = CollectCoverageCandidates(reachableMask, outsideBlockedMask, reachableBounds, routeStep, detectionRadius);
+        if (candidates.Count == 0)
+        {
+            return;
+        }
 
-            _explorationRoute = BuildCoverageRoute(candidates, playerPos, pathData);
+        TryAddPlayerAnchorCandidate(candidates, playerPos, reachableMask, outsideBlockedMask, routeStep, detectionRadius);
+        _explorationRoute = BuildCoverageRoute(candidates, playerPos);
+    }
+
+    private static List<Vector2> BuildCoverageRoute(List<Vector2> points, Vector2 startNear)
+    {
+        return OrderByNearestNeighbor(points, startNear);
+    }
+
+    private static bool TryFindNearestWalkableCell(int[][] pathData, int maxX, int maxY, int startX, int startY,
+        int maxSearchRadius, out (int x, int y) cell)
+    {
+        if (IsWalkableCell(pathData, startY, startX))
+        {
+            cell = (startX, startY);
+            return true;
+        }
+
+        for (var radius = 1; radius <= maxSearchRadius; radius++)
+        {
+            for (var dy = -radius; dy <= radius; dy++)
+            for (var dx = -radius; dx <= radius; dx++)
+            {
+                if (Math.Abs(dx) != radius && Math.Abs(dy) != radius) continue;
+
+                var x = startX + dx;
+                var y = startY + dy;
+                if (x < 0 || x >= maxX || y < 0 || y >= maxY) continue;
+                if (!IsWalkableCell(pathData, y, x)) continue;
+
+                cell = (x, y);
+                return true;
+            }
+        }
+
+        cell = default;
+        return false;
+    }
+
+    private static bool[][] BuildReachableMask(int[][] pathData, int maxX, int maxY, int startX, int startY,
+        out RouteBounds bounds)
+    {
+        var reachableMask = new bool[maxY][];
+        for (var y = 0; y < maxY; y++)
+        {
+            reachableMask[y] = new bool[maxX];
+        }
+
+        var queue = new Queue<(int x, int y)>();
+        queue.Enqueue((startX, startY));
+        reachableMask[startY][startX] = true;
+
+        var minX = startX;
+        var minY = startY;
+        var maxReachableX = startX;
+        var maxReachableY = startY;
+
+        while (queue.Count > 0)
+        {
+            var (x, y) = queue.Dequeue();
+
+            if (x < minX) minX = x;
+            if (y < minY) minY = y;
+            if (x > maxReachableX) maxReachableX = x;
+            if (y > maxReachableY) maxReachableY = y;
+
+            TryVisit(x + 1, y);
+            TryVisit(x - 1, y);
+            TryVisit(x, y + 1);
+            TryVisit(x, y - 1);
+        }
+
+        bounds = new RouteBounds(minX, minY, maxReachableX, maxReachableY);
+        return reachableMask;
+
+        void TryVisit(int x, int y)
+        {
+            if (x < 0 || x >= maxX || y < 0 || y >= maxY) return;
+            if (reachableMask[y][x]) return;
+            if (!IsWalkableCell(pathData, y, x)) return;
+
+            reachableMask[y][x] = true;
+            queue.Enqueue((x, y));
         }
     }
 
-    private static void TryAddPlayerAnchorCandidate(
-        List<Vector2> candidates, Vector2 playerPos, int[][] pathData, bool[][] outsideBlockedMask, int r)
+    private static List<Vector2> CollectCoverageCandidates(bool[][] reachableMask, bool[][] outsideBlockedMask,
+        RouteBounds bounds, int step, int detectionRadius)
     {
-        if (candidates.Count == 0) return;
+        var bestCandidates = new List<Vector2>();
+        Span<int> clearanceLevels = stackalloc int[5];
+        var clearanceLevelCount = FillClearanceLevels(clearanceLevels, detectionRadius);
 
-        var minExistingDistSq = float.MaxValue;
-        for (var i = 0; i < candidates.Count; i++)
+        for (var clearanceIndex = 0; clearanceIndex < clearanceLevelCount; clearanceIndex++)
         {
-            var d = Vector2.DistanceSquared(candidates[i], playerPos);
-            if (d < minExistingDistSq) minExistingDistSq = d;
-        }
+            var clearance = clearanceLevels[clearanceIndex];
+            var candidates = new List<Vector2>();
 
-        var minWantedDist = Math.Max(6, r / 3);
-        if (minExistingDistSq <= minWantedDist * minWantedDist) return;
-
-        var px = (int)playerPos.X;
-        var py = (int)playerPos.Y;
-        var maxSearch = Math.Max(10, r / 2);
-        var clearanceLevels = new[] { Math.Max(6, r / 3), Math.Max(4, r / 4), 3 }.Distinct();
-
-        foreach (var clearance in clearanceLevels)
-        {
-            for (var radius = 0; radius <= maxSearch; radius++)
+            for (var y = bounds.MinY; y <= bounds.MaxY; y += step)
+            for (var x = bounds.MinX; x <= bounds.MaxX; x += step)
             {
-                for (var dy = -radius; dy <= radius; dy++)
-                for (var dx = -radius; dx <= radius; dx++)
+                if (TryFindBestCandidateInBlock(reachableMask, outsideBlockedMask, x, y, step, clearance, out var candidate))
                 {
-                    if (Math.Abs(dx) != radius && Math.Abs(dy) != radius) continue;
-
-                    var x = px + dx;
-                    var y = py + dy;
-                    if (!IsWalkableCell(pathData, y, x)) continue;
-                    if (!HasOutsideWallClearance(outsideBlockedMask, y, x, clearance)) continue;
-
-                    candidates.Add(new Vector2(x, y));
-                    return;
+                    candidates.Add(candidate);
                 }
             }
-        }
-    }
 
-    private static List<Vector2> BuildCoverageRoute(List<Vector2> points, Vector2? startNear, int[][] pathData = null)
-    {
-        return OrderByNearestNeighbor(points, startNear, pathData);
-    }
-
-    private List<Vector2> CollectCandidates(int[][] pathData, bool[][] outsideBlockedMask, int maxX, int maxY,
-                                            int r, int step)
-    {
-        var result = new List<Vector2>();
-        var best   = new List<Vector2>();
-        var clearanceLevels = new[]
-        {
-            Math.Max(6, r / 3),
-            Math.Max(4, r / 5),
-            Math.Max(3, r / 8),
-            2,
-        }.Distinct();
-
-        var sampleMargin = Math.Max(2, r / 10);
-        const int minDesiredCandidates = 6;
-
-        foreach (var wallClearance in clearanceLevels)
-        {
-            result.Clear();
-
-            for (var y = sampleMargin; y < maxY - sampleMargin; y += step)
-            for (var x = sampleMargin; x < maxX - sampleMargin; x += step)
+            if (candidates.Count > bestCandidates.Count)
             {
-                if (!IsWalkableCell(pathData, y, x)) continue;
-                if (HasOutsideWallClearance(outsideBlockedMask, y, x, wallClearance))
-                    result.Add(new Vector2(x, y));
+                bestCandidates = candidates;
             }
 
-            if (result.Count > best.Count)
-                best = new List<Vector2>(result);
-
-            if (result.Count >= minDesiredCandidates)
-                break;
+            if (candidates.Count >= 6)
+            {
+                return candidates;
+            }
         }
 
-        return best;
+        return bestCandidates;
+    }
+
+    private static bool TryFindBestCandidateInBlock(bool[][] reachableMask, bool[][] outsideBlockedMask,
+        int startX, int startY, int step, int outsideWallClearance, out Vector2 candidate)
+    {
+        candidate = default;
+
+        var centerX = startX + step / 2f;
+        var centerY = startY + step / 2f;
+        var bestDistance = float.MaxValue;
+        var found = false;
+
+        var endY = Math.Min(reachableMask.Length, startY + step);
+        for (var y = Math.Max(0, startY); y < endY; y++)
+        {
+            var row = reachableMask[y];
+            if (row == null) continue;
+
+            var endX = Math.Min(row.Length, startX + step);
+            for (var x = Math.Max(0, startX); x < endX; x++)
+            {
+                if (!row[x]) continue;
+                if (!HasOutsideWallClearance(outsideBlockedMask, y, x, outsideWallClearance)) continue;
+
+                var dx = x - centerX;
+                var dy = y - centerY;
+                var distance = dx * dx + dy * dy;
+                if (distance >= bestDistance) continue;
+
+                bestDistance = distance;
+                candidate = new Vector2(x, y);
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    private static void TryAddPlayerAnchorCandidate(List<Vector2> candidates, Vector2 playerPos, bool[][] reachableMask,
+        bool[][] outsideBlockedMask, int step, int detectionRadius)
+    {
+        var minDistanceSq = float.MaxValue;
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            var distance = Vector2.DistanceSquared(candidates[i], playerPos);
+            if (distance < minDistanceSq)
+            {
+                minDistanceSq = distance;
+            }
+        }
+
+        var minDesiredDistance = Math.Max(6, step / 2);
+        if (minDistanceSq <= minDesiredDistance * minDesiredDistance)
+        {
+            return;
+        }
+
+        if (!TryFindNearestReachableCell(reachableMask, outsideBlockedMask, (int)playerPos.X, (int)playerPos.Y,
+                step, detectionRadius, out var anchor))
+        {
+            return;
+        }
+
+        for (var i = 0; i < candidates.Count; i++)
+        {
+            if (Vector2.DistanceSquared(candidates[i], anchor) < 1f)
+            {
+                return;
+            }
+        }
+
+        candidates.Add(anchor);
+    }
+
+    private static bool TryFindNearestReachableCell(bool[][] reachableMask, bool[][] outsideBlockedMask,
+        int startX, int startY, int maxSearchRadius, int detectionRadius, out Vector2 cell)
+    {
+        Span<int> clearanceLevels = stackalloc int[5];
+        var clearanceLevelCount = FillClearanceLevels(clearanceLevels, detectionRadius);
+
+        for (var clearanceIndex = 0; clearanceIndex < clearanceLevelCount; clearanceIndex++)
+        {
+            var clearance = clearanceLevels[clearanceIndex];
+            if (TryFindNearestReachableCellWithClearance(reachableMask, outsideBlockedMask, startX, startY, maxSearchRadius,
+                    clearance, out cell))
+            {
+                return true;
+            }
+        }
+
+        cell = default;
+        return false;
+    }
+
+    private static bool TryFindNearestReachableCellWithClearance(bool[][] reachableMask, bool[][] outsideBlockedMask,
+        int startX, int startY, int maxSearchRadius, int outsideWallClearance, out Vector2 cell)
+    {
+        if (IsReachableCell(reachableMask, startY, startX) &&
+            HasOutsideWallClearance(outsideBlockedMask, startY, startX, outsideWallClearance))
+        {
+            cell = new Vector2(startX, startY);
+            return true;
+        }
+
+        for (var radius = 1; radius <= maxSearchRadius; radius++)
+        {
+            for (var dy = -radius; dy <= radius; dy++)
+            for (var dx = -radius; dx <= radius; dx++)
+            {
+                if (Math.Abs(dx) != radius && Math.Abs(dy) != radius) continue;
+
+                var x = startX + dx;
+                var y = startY + dy;
+                if (!IsReachableCell(reachableMask, y, x)) continue;
+                if (!HasOutsideWallClearance(outsideBlockedMask, y, x, outsideWallClearance)) continue;
+
+                cell = new Vector2(x, y);
+                return true;
+            }
+        }
+
+        cell = default;
+        return false;
     }
 
     private static bool HasOutsideWallClearance(bool[][] outsideBlockedMask, int y, int x, int clearance)
     {
-        var cSq = clearance * clearance;
+        var clearanceSq = clearance * clearance;
         for (var dy = -clearance; dy <= clearance; dy++)
         for (var dx = -clearance; dx <= clearance; dx++)
         {
-            if (dx * dx + dy * dy > cSq) continue;
+            if (dx * dx + dy * dy > clearanceSq) continue;
             if (IsOutsideBlockedCell(outsideBlockedMask, y + dy, x + dx)) return false;
         }
+
         return true;
+    }
+
+    private static int FillClearanceLevels(Span<int> levels, int detectionRadius)
+    {
+        var count = 0;
+
+        Span<int> candidates = stackalloc int[5];
+        candidates[0] = Math.Max(3, detectionRadius);
+        candidates[1] = Math.Max(3, detectionRadius * 2 / 3);
+        candidates[2] = Math.Max(2, detectionRadius / 2);
+        candidates[3] = Math.Max(2, detectionRadius / 3);
+        candidates[4] = 1;
+
+        for (var candidateIndex = 0; candidateIndex < candidates.Length; candidateIndex++)
+        {
+            var value = candidates[candidateIndex];
+            var exists = false;
+            for (var i = 0; i < count; i++)
+            {
+                if (levels[i] == value)
+                {
+                    exists = true;
+                    break;
+                }
+            }
+
+            if (!exists)
+            {
+                levels[count++] = value;
+            }
+        }
+
+        return count;
     }
 
     private static bool[][] BuildOutsideBlockedMask(int[][] pathData, int maxX, int maxY)
     {
         var mask = new bool[maxY][];
         for (var y = 0; y < maxY; y++)
+        {
             mask[y] = new bool[maxX];
+        }
 
-        var q = new Queue<(int x, int y)>();
+        var queue = new Queue<(int x, int y)>();
 
-        void EnqueueIfOutsideBlocked(int x, int y)
+        void TryMark(int x, int y)
         {
             if (y < 0 || y >= maxY || x < 0 || x >= maxX) return;
             if (mask[y][x]) return;
             if (IsWalkableCell(pathData, y, x)) return;
+
             mask[y][x] = true;
-            q.Enqueue((x, y));
+            queue.Enqueue((x, y));
         }
 
         for (var x = 0; x < maxX; x++)
         {
-            EnqueueIfOutsideBlocked(x, 0);
-            EnqueueIfOutsideBlocked(x, maxY - 1);
+            TryMark(x, 0);
+            TryMark(x, maxY - 1);
         }
 
         for (var y = 0; y < maxY; y++)
         {
-            EnqueueIfOutsideBlocked(0, y);
-            EnqueueIfOutsideBlocked(maxX - 1, y);
+            TryMark(0, y);
+            TryMark(maxX - 1, y);
         }
 
-        while (q.Count > 0)
+        while (queue.Count > 0)
         {
-            var (cx, cy) = q.Dequeue();
-            EnqueueIfOutsideBlocked(cx + 1, cy);
-            EnqueueIfOutsideBlocked(cx - 1, cy);
-            EnqueueIfOutsideBlocked(cx, cy + 1);
-            EnqueueIfOutsideBlocked(cx, cy - 1);
+            var (x, y) = queue.Dequeue();
+            TryMark(x + 1, y);
+            TryMark(x - 1, y);
+            TryMark(x, y + 1);
+            TryMark(x, y - 1);
         }
 
         return mask;
@@ -262,140 +459,59 @@ public partial class RareBeastCounter
         return row[x];
     }
 
-    // Bresenham-style walkability trace; capped at 200 steps so it stays fast.
-    // Returns false as soon as any non-walkable cell is crossed.
-    private static bool HasLineOfSight(int[][] pathData, Vector2 from, Vector2 to)
+    private static bool IsReachableCell(bool[][] reachableMask, int y, int x)
     {
-        var dx    = to.X - from.X;
-        var dy    = to.Y - from.Y;
-        var steps = (int)Math.Max(Math.Abs(dx), Math.Abs(dy));
-        steps     = Math.Min(steps, 200);
-        if (steps < 2) return true;
-
-        for (var i = 1; i < steps; i++)
-        {
-            var x = (int)(from.X + dx * i / steps);
-            var y = (int)(from.Y + dy * i / steps);
-            if (!IsWalkableCell(pathData, y, x)) return false;
-        }
-        return true;
+        if (y < 0 || y >= reachableMask.Length) return false;
+        var row = reachableMask[y];
+        if (row == null || x < 0 || x >= row.Length) return false;
+        return row[x];
     }
 
-    // Greedy nearest-neighbour TSP starting from the point nearest to startNear.
-    // When pathData is provided, direct LOS candidates are always preferred first,
-    // and non-LOS pairs are used only as fallback with a heavy distance penalty.
-    private static List<Vector2> OrderByNearestNeighbor(
-        List<Vector2> points, Vector2? startNear, int[][] pathData = null)
+    private static List<Vector2> OrderByNearestNeighbor(List<Vector2> points, Vector2 startNear)
     {
         if (points.Count <= 1) return new List<Vector2>(points);
 
-        var startIdx = 0;
-        if (startNear.HasValue)
+        var startIndex = 0;
+        var bestStartDistance = float.MaxValue;
+        for (var i = 0; i < points.Count; i++)
         {
-            var bestDist = float.MaxValue;
-            for (var i = 0; i < points.Count; i++)
-            {
-                var d = Vector2.DistanceSquared(points[i], startNear.Value);
-                if (d < bestDist) { bestDist = d; startIdx = i; }
-            }
+            var distance = Vector2.DistanceSquared(points[i], startNear);
+            if (distance >= bestStartDistance) continue;
+
+            bestStartDistance = distance;
+            startIndex = i;
         }
 
         var result = new List<Vector2>(points.Count);
-        var used   = new bool[points.Count];
-        var cur    = startIdx;
-        used[cur]  = true;
-        result.Add(points[cur]);
+        var used = new bool[points.Count];
+        var currentIndex = startIndex;
+        used[currentIndex] = true;
+        result.Add(points[currentIndex]);
 
         for (var i = 1; i < points.Count; i++)
         {
-            var bestLos      = -1;
-            var bestLosScore = float.MaxValue;
-            var bestAny      = -1;
-            var bestAnyScore = float.MaxValue;
+            var nextIndex = -1;
+            var bestNextDistance = float.MaxValue;
 
             for (var j = 0; j < points.Count; j++)
             {
                 if (used[j]) continue;
 
-                var d = Vector2.DistanceSquared(points[cur], points[j]);
-                var hasLos = pathData == null || HasLineOfSight(pathData, points[cur], points[j]);
+                var distance = Vector2.DistanceSquared(points[currentIndex], points[j]);
+                if (distance >= bestNextDistance) continue;
 
-                if (hasLos && d < bestLosScore)
-                {
-                    bestLosScore = d;
-                    bestLos = j;
-                }
-
-                if (!hasLos)
-                    d *= 36f;
-
-                if (d < bestAnyScore)
-                {
-                    bestAnyScore = d;
-                    bestAny = j;
-                }
+                bestNextDistance = distance;
+                nextIndex = j;
             }
 
-            var best = bestLos >= 0 ? bestLos : bestAny;
-            if (best < 0) break;
+            if (nextIndex < 0) break;
 
-            used[best] = true;
-            cur        = best;
-            result.Add(points[best]);
+            used[nextIndex] = true;
+            currentIndex = nextIndex;
+            result.Add(points[currentIndex]);
         }
+
         return result;
-    }
-
-    // BFS over the candidate grid (step-spaced points connected by LOS) to keep only
-    // the component containing the player's spawn, dropping isolated patches.
-    private static List<Vector2> FilterToReachableComponent(
-        List<Vector2> candidates, Vector2 playerPos, int[][] pathData, int step)
-    {
-        if (candidates.Count == 0) return candidates;
-
-        var startX = (int)playerPos.X;
-        var startY = (int)playerPos.Y;
-
-        // If the player's exact cell is unwalkable, expand outward to find a walkable seed.
-        if (!IsWalkableCell(pathData, startY, startX))
-        {
-            var found = false;
-            for (var r = 1; r <= step * 2 && !found; r++)
-            for (var dy = -r; dy <= r && !found; dy++)
-            for (var dx = -r; dx <= r && !found; dx++)
-            {
-                if (Math.Abs(dx) != r && Math.Abs(dy) != r) continue;
-                if (!IsWalkableCell(pathData, startY + dy, startX + dx)) continue;
-                startX += dx; startY += dy; found = true;
-            }
-            if (!found) return candidates; // can't determine reachability, keep all
-        }
-
-        // Full flood-fill on walkable cells from the player's spawn position.
-        // This correctly routes around obstacles that would break a direct LOS check.
-        var reachable = new HashSet<(int, int)>();
-        var queue     = new Queue<(int, int)>();
-
-        void TryEnqueue(int x, int y)
-        {
-            if (!IsWalkableCell(pathData, y, x)) return;
-            if (!reachable.Add((x, y))) return;
-            queue.Enqueue((x, y));
-        }
-
-        TryEnqueue(startX, startY);
-
-        while (queue.Count > 0)
-        {
-            var (cx, cy) = queue.Dequeue();
-            TryEnqueue(cx + 1, cy);
-            TryEnqueue(cx - 1, cy);
-            TryEnqueue(cx, cy + 1);
-            TryEnqueue(cx, cy - 1);
-        }
-
-        // Keep only candidates whose grid cell was reached by the flood-fill.
-        return candidates.Where(c => reachable.Contains(((int)c.X, (int)c.Y))).ToList();
     }
 
     private static bool IsWalkableCell(int[][] pathData, int y, int x)
@@ -422,8 +538,11 @@ public partial class RareBeastCounter
         var nextIdx = GetNextWaypointIndex();
 
         var visitedCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 0.25f));
-        var routeCol   = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 0.8f, 1f,   0.7f));
-        var nextCol    = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f,   1f,   0f,   1f));
+        var routeCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 0.8f, 1f, 0.7f));
+        var nextCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f, 1f, 0f, 1f));
+        const float routeLineThickness = 1.5f;
+        const float waypointRadius = 2f;
+        const float nextWaypointRadius = 5f;
 
         for (var i = 0; i < _explorationRoute.Count - 1; i++)
         {
@@ -431,36 +550,134 @@ public partial class RareBeastCounter
             var b = mapCenter + TranslateGridDeltaToMapDelta(_explorationRoute[i + 1] - playerGridPos, 0);
             var col = _visitedWaypointIndices.Contains(i) && _visitedWaypointIndices.Contains(i + 1)
                 ? visitedCol : routeCol;
-            _mapDrawList.AddLine(a, b, col, 1.5f);
+            _mapDrawList.AddLine(a, b, col, routeLineThickness);
         }
 
         for (var i = 0; i < _explorationRoute.Count; i++)
         {
             var pos = mapCenter + TranslateGridDeltaToMapDelta(_explorationRoute[i] - playerGridPos, 0);
             if (i == nextIdx)
-                _mapDrawList.AddCircleFilled(pos, 5f, nextCol);
+                _mapDrawList.AddCircleFilled(pos, nextWaypointRadius, nextCol);
             else if (!_visitedWaypointIndices.Contains(i))
-                _mapDrawList.AddCircleFilled(pos, 2f, routeCol);
+                _mapDrawList.AddCircleFilled(pos, waypointRadius, routeCol);
         }
 
         DrawDetectionRadiusOnMap(mapCenter, Settings.MapRender.ExplorationRoute.DetectionRadius.Value);
     }
 
+    private void DrawExplorationCoverageOnMiniMap(Vector2 mapCenter)
+    {
+        EnsureExplorationRouteIsCurrent();
+
+        if (_explorationRoute.Count == 0) return;
+
+        var player = GameController.Game.IngameState.Data.LocalPlayer;
+        var playerRender = player?.GetComponent<Render>();
+        var playerPositioned = player?.GetComponent<Positioned>();
+        if (playerRender == null || playerPositioned == null) return;
+
+        var playerGridPos = new Vector2(playerPositioned.GridPosNum.X, playerPositioned.GridPosNum.Y);
+        var playerHeight = -playerRender.RenderStruct.Height;
+        var heightData = GameController.IngameState.Data.RawTerrainHeightData;
+
+        UpdateVisitedWaypoints(playerGridPos);
+        var nextIdx = GetNextWaypointIndex();
+        var detectionRadius = Settings.MapRender.ExplorationRoute.DetectionRadius.Value;
+
+        var coverageCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f, 1f, 0.2f, 0.18f));
+        var visitedCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.5f, 0.5f, 0.5f, 0.20f));
+        var routeCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(0.2f, 0.8f, 1f, 0.7f));
+        var nextCol = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f, 1f, 0f, 1f));
+        const float miniMapRouteLineThickness = 1.2f;
+        const float miniMapWaypointRadius = 2f;
+        const float miniMapNextWaypointRadius = 4f;
+        const float miniMapCoverageThickness = 1f;
+
+        for (var i = 0; i < _explorationRoute.Count; i++)
+        {
+            if (_visitedWaypointIndices.Contains(i)) continue;
+
+            var waypointPos = mapCenter + TranslateGridDeltaToMiniMapDelta(
+                _explorationRoute[i] - playerGridPos,
+                GetHeightDeltaInGridUnits(heightData, _explorationRoute[i], playerHeight));
+            DrawRadiusCircleOnMiniMap(waypointPos, detectionRadius, coverageCol, miniMapCoverageThickness);
+        }
+
+        for (var i = 0; i < _explorationRoute.Count - 1; i++)
+        {
+            var a = mapCenter + TranslateGridDeltaToMiniMapDelta(
+                _explorationRoute[i] - playerGridPos,
+                GetHeightDeltaInGridUnits(heightData, _explorationRoute[i], playerHeight));
+            var b = mapCenter + TranslateGridDeltaToMiniMapDelta(
+                _explorationRoute[i + 1] - playerGridPos,
+                GetHeightDeltaInGridUnits(heightData, _explorationRoute[i + 1], playerHeight));
+            var col = _visitedWaypointIndices.Contains(i) && _visitedWaypointIndices.Contains(i + 1)
+                ? visitedCol : routeCol;
+            _mapDrawList.AddLine(a, b, col, miniMapRouteLineThickness);
+        }
+
+        for (var i = 0; i < _explorationRoute.Count; i++)
+        {
+            var pos = mapCenter + TranslateGridDeltaToMiniMapDelta(
+                _explorationRoute[i] - playerGridPos,
+                GetHeightDeltaInGridUnits(heightData, _explorationRoute[i], playerHeight));
+            if (i == nextIdx)
+                _mapDrawList.AddCircleFilled(pos, miniMapNextWaypointRadius, nextCol);
+            else if (!_visitedWaypointIndices.Contains(i))
+                _mapDrawList.AddCircleFilled(pos, miniMapWaypointRadius, routeCol);
+        }
+    }
+
     private void DrawDetectionRadiusOnMap(Vector2 mapCenter, int radius)
     {
-        const int segments = 48;
         var col = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(1f, 1f, 0.2f, 0.45f));
+        DrawRadiusCircleOnMap(mapCenter, radius, col, 1.5f);
+    }
 
+    private void DrawRadiusCircleOnMap(Vector2 center, int radius, uint color, float thickness)
+    {
         Vector2? prev = null;
-        for (var i = 0; i <= segments; i++)
+        foreach (var point in RadiusCirclePoints)
         {
-            var angle  = i * 2f * MathF.PI / segments;
-            var mapPos = mapCenter + TranslateGridDeltaToMapDelta(
-                new Vector2(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius), 0);
+            var mapPos = center + TranslateGridDeltaToMapDelta(point * radius, 0);
             if (prev.HasValue)
-                _mapDrawList.AddLine(prev.Value, mapPos, col, 1.5f);
+                _mapDrawList.AddLine(prev.Value, mapPos, color, thickness);
             prev = mapPos;
         }
+    }
+
+    private void DrawRadiusCircleOnMiniMap(Vector2 center, int radius, uint color, float thickness)
+    {
+        Vector2? prev = null;
+        foreach (var point in RadiusCirclePoints)
+        {
+            var miniMapPos = center + TranslateGridDeltaToMiniMapDelta(point * radius, 0);
+            if (prev.HasValue)
+                _mapDrawList.AddLine(prev.Value, miniMapPos, color, thickness);
+            prev = miniMapPos;
+        }
+    }
+
+    private static float GetHeightDeltaInGridUnits(float[][] heightData, Vector2 gridPos, float playerHeight)
+    {
+        if (heightData != null)
+        {
+            var x = (int)gridPos.X;
+            var y = (int)gridPos.Y;
+            if (y >= 0 && y < heightData.Length && x >= 0 && x < heightData[y].Length)
+            {
+                return (playerHeight + heightData[y][x]) / GridToWorldMultiplier;
+            }
+        }
+
+        return playerHeight / GridToWorldMultiplier;
+    }
+
+    private Vector2 TranslateGridDeltaToMiniMapDelta(Vector2 delta, float deltaZ)
+    {
+        return (float)_mapScale * Vector2.Multiply(
+            new Vector2(delta.X - delta.Y, deltaZ - (delta.X + delta.Y)),
+            new Vector2(CameraAngleCos, CameraAngleSin));
     }
 
     private void EnsureExplorationRouteIsCurrent()

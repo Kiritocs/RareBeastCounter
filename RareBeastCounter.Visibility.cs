@@ -1,4 +1,3 @@
-using System.Linq;
 using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.MemoryObjects;
 
@@ -59,7 +58,15 @@ public partial class RareBeastCounter
 
     private static bool HasVisibleFullscreenPanels(IngameUIElements ingameUi)
     {
-        return ingameUi.FullscreenPanels.Any(x => x.IsVisible);
+        foreach (var panel in ingameUi.FullscreenPanels)
+        {
+            if (panel.IsVisible)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private bool IsConfiguredCounterSidePanelOpen(IngameUIElements ingameUi)

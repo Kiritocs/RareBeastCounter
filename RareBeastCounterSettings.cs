@@ -12,50 +12,44 @@ public class RareBeastCounterSettings : ISettings
     [Menu("Enable", "Enable or disable the Rare Beast Counter plugin.")]
     public ToggleNode Enable { get; set; } = new(false);
 
-    [Menu("Visibility", "When the counter and completed message are allowed to render.")]
-    public VisibilitySettings Visibility { get; set; } = new();
-
-    [Menu("Counter Window", "Main on-screen counter window settings.")]
+    [Menu("Counter Overlay", "Main beast counter overlay settings.")]
     public CounterWindowSettings CounterWindow { get; set; } = new();
 
-    [Menu("Counter (Completed State)", "How the main counter looks when all beasts are found.")]
-    public CompletedCounterSettings CompletedCounter { get; set; } = new();
-
-    [Menu("Completed Message Window", "Separate window shown after all beasts are found.")]
-    public CompletedMessageWindowSettings CompletedMessageWindow { get; set; } = new();
-
-    [Menu("Analytics Window", "Separate window for map/session timing and valuable beast spawn analytics.")]
+    [Menu("Analytics Overlay", "Session and map timing analytics, including valuable beast counts.")]
     public AnalyticsWindowSettings AnalyticsWindow { get; set; } = new();
 
-    [Menu("Map & World Render", "Settings for marking beasts on map, in world, and in UI panels.")]
+    [Menu("Visibility Rules", "Rules for hiding the counter and analytics overlays in specific UI states.")]
+    public VisibilitySettings Visibility { get; set; } = new();
+
+    [Menu("Beast Markers & Panel Overlays", "Settings for world labels, map labels, tracked beasts, and UI price overlays.")]
     public MapRenderSettings MapRender { get; set; } = new();
 
-    [Menu("Beast Prices", "Settings for fetching beast prices from poe.ninja.")]
+    [Menu("Price Data", "Settings for fetching and using beast prices from poe.ninja.")]
     public BeastPricesSettings BeastPrices { get; set; } = new();
 
-    [Menu("Bestiary Clipboard", "Auto-copy a regex to clipboard when the Bestiary tab is opened.")]
+    [Menu("Bestiary Clipboard", "Automatically copy a Bestiary search regex when the Bestiary tab is opened.")]
     public BestiaryClipboardSettings BestiaryClipboard { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = false)]
 public class VisibilitySettings
 {
-    [Menu("Hide In Hideout", "Do not show counter/message while inside hideouts.")]
+    [Menu("Hide Counter & Message In Hideout", "Hide the main counter and completed message while inside a hideout.")]
     public ToggleNode HideInHideout { get; set; } = new(true);
 
-    [Menu("Hide On Fullscreen Panels", "Do not show overlays while any fullscreen UI panel is visible.")]
+    [Menu("Hide Counter & Message On Fullscreen Panels", "Hide the main counter and completed message while any fullscreen panel is open.")]
     public ToggleNode HideOnFullscreenPanels { get; set; } = new(true);
 
-    [Menu("Hide On Open Left Panel", "Hide counter/message while OpenLeftPanel is visible.")]
+    [Menu("Hide Counter & Message On Open Left Panel", "Hide the main counter and completed message while the left side panel is open.")]
     public ToggleNode HideOnOpenLeftPanel { get; set; } = new(true);
 
-    [Menu("Hide On Open Right Panel", "Hide counter/message while OpenRightPanel is visible.")]
+    [Menu("Hide Counter & Message On Open Right Panel", "Hide the main counter and completed message while the right side panel is open.")]
     public ToggleNode HideOnOpenRightPanel { get; set; } = new(true);
 
-    [Menu("Hide Analytics On Open Left Panel", "Hide analytics overlay while OpenLeftPanel is visible.")]
+    [Menu("Hide Analytics On Open Left Panel", "Hide the analytics overlay while the left side panel is open.")]
     public ToggleNode HideAnalyticsOnOpenLeftPanel { get; set; } = new(true);
 
-    [Menu("Hide Analytics On Open Right Panel", "Hide analytics overlay while OpenRightPanel is visible.")]
+    [Menu("Hide Analytics On Open Right Panel", "Hide the analytics overlay while the right side panel is open.")]
     public ToggleNode HideAnalyticsOnOpenRightPanel { get; set; } = new(true);
 }
 
@@ -88,6 +82,12 @@ public class CounterWindowSettings
 
     [Menu("Background Color", "Background color of the main counter window.")]
     public ColorNode BackgroundColor { get; set; } = new(new Color(0, 0, 0, 180));
+
+    [Menu("Completed Counter Style", "How the main counter looks after all beasts in the area are found.")]
+    public CompletedCounterSettings CompletedStyle { get; set; } = new();
+
+    [Menu("Completed Message Overlay", "Separate message overlay shown after all beasts in the area are found.")]
+    public CompletedMessageWindowSettings CompletedMessage { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = false)]
@@ -192,10 +192,10 @@ public class AnalyticsWindowSettings
 [Submenu(CollapsedByDefault = true)]
 public class BeastPricesSettings
 {
-    [Menu("League", "The league name to fetch prices for (e.g. Mirage).")]
+    [Menu("League Name", "League name used for poe.ninja price requests, for example Mirage.")]
     public TextNode League { get; set; } = new("Mirage");
 
-    [Menu("Auto-Refresh (minutes)", "Re-fetch prices automatically every N minutes. Set to 0 to disable.")]
+    [Menu("Auto Refresh (Minutes)", "Automatically refresh beast prices every N minutes. Set to 0 to disable auto refresh.")]
     public RangeNode<int> AutoRefreshMinutes { get; set; } = new(10, 0, 60);
 
     [Menu("Fetch Prices", "Manually fetch current beast prices from poe.ninja.")]
@@ -205,128 +205,157 @@ public class BeastPricesSettings
 
     public HashSet<string> EnabledBeasts { get; set; } = new();
 
-    [Menu("Beast Picker", "Select which beasts to show in the analytics window.")]
+    [Menu("Enabled Beasts", "Choose which beasts count as enabled for filtering, analytics, and Bestiary auto-regex generation.")]
     [JsonIgnore] public CustomNode BeastPickerPanel { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = true)]
 public class BestiaryClipboardSettings
 {
-    [Menu("Enable Auto-Copy", "Automatically copy the regex to clipboard when the Bestiary tab becomes visible.")]
+    [Menu("Enable Auto Copy", "Automatically copy a Bestiary search regex when the Bestiary tab becomes visible.")]
     public ToggleNode EnableAutoCopy { get; set; } = new(true);
 
-    [Menu("Auto-Generate Regex", "Build the regex automatically from the beasts selected in Beast Prices instead of using the manual field.")]
+    [Menu("Generate Regex From Enabled Beasts", "Build the regex from Price Data -> Enabled Beasts instead of using the manual regex field.")]
     public ToggleNode UseAutoRegex { get; set; } = new(true);
 
-    [Menu("Beast Regex", "Regex copied to clipboard when Auto-Generate is off.")]
+    [Menu("Manual Regex", "Regex copied to the clipboard when automatic regex generation is disabled.")]
     public TextNode BeastRegex { get; set; } = new("id v|le m|ld h|s ho|k m|an fi|ul, f|cic c|nd sc|s, f|d bra|l pla|n, f|l cru| cy");
 }
 
 [Submenu(CollapsedByDefault = true)]
 public class MapRenderSettings
 {
-    [Menu("Show Beast Labels In World", "Draw beast name and a highlight circle on entities currently detected by ExileAPI in the game world.")]
+    [Menu("Show World Labels", "Draw tracked beast labels and circles in the game world.")]
     public ToggleNode ShowBeastLabelsInWorld { get; set; } = new(true);
 
-    [Menu("Show Beasts On Large Map", "Draw name/price markers for beasts currently detected by ExileAPI on the large map.")]
+    [Menu("Show Large Map Labels", "Draw tracked beast labels on the large map.")]
     public ToggleNode ShowBeastsOnMap { get; set; } = new(true);
 
-    [Menu("Show Tracked Beasts Window", "Show a floating window listing beasts currently detected by ExileAPI and their prices.")]
+    [Menu("Show Tracked Beasts Window", "Show a small window listing currently tracked beasts and their prices.")]
     public ToggleNode ShowTrackedBeastsWindow { get; set; } = new(true);
 
-    [Menu("Show Prices In Inventory", "Overlay beast prices on captured monster items in the player inventory.")]
+    [Menu("Show Inventory Prices", "Overlay beast prices on captured beast items in the player inventory.")]
     public ToggleNode ShowPricesInInventory { get; set; } = new(true);
 
-    [Menu("Show Prices In Stash", "Overlay beast prices on captured monster items in the stash.")]
+    [Menu("Show Stash Prices", "Overlay beast prices on captured beast items in the stash.")]
     public ToggleNode ShowPricesInStash { get; set; } = new(true);
 
-    [Menu("Show Prices In Bestiary", "Overlay beast prices in the Bestiary captured-beasts panel.")]
+    [Menu("Show Bestiary Prices", "Overlay beast prices in the Bestiary captured-beasts panel.")]
     public ToggleNode ShowPricesInBestiary { get; set; } = new(true);
 
-    [Menu("Show Enabled Beasts Only", "Only highlight/display beasts that are checked in the Beast Picker.")]
+    [Menu("Only Show Enabled Beasts", "Only show beasts that are enabled in Price Data -> Enabled Beasts.")]
     public ToggleNode ShowEnabledOnly { get; set; } = new(true);
 
-    [Menu("Show Name Instead Of Price", "Show the beast's name on map markers instead of appending its chaos value.")]
+    [Menu("Show Name Only On Map Labels", "On large-map labels, show only the beast name instead of name plus price.")]
     public ToggleNode ShowNameInsteadOfPrice { get; set; } = new(false);
 
-    [Menu("Colors", "Color settings for world labels, map markers, and the tracked beasts window.")]
+    [Menu("Show Style Preview Window", "Show a movable preview window that demonstrates how the current text colors, captured text mode, and label styling look without needing a live beast.")]
+    public ToggleNode ShowStylePreviewWindow { get; set; } = new(false);
+
+    [Menu("Captured Status Text", "Controls how captured beasts are labeled in world labels and large-map labels.")]
+    public CapturedTextDisplaySettings CapturedText { get; set; } = new();
+
+    [Menu("Colors", "Colors used by world labels, large-map labels, and the tracked beasts window.")]
     public MapRenderColorSettings Colors { get; set; } = new();
 
-    [Menu("Layout", "Size and spacing settings for world labels and map markers.")]
+    [Menu("Layout", "Size and spacing settings for world labels and circles.")]
     public MapRenderLayoutSettings Layout { get; set; } = new();
 
-    [Menu("⚠ EXPLORATION ROUTE (DO NOT USE)", "Broken experimental pathfinding junk. Do not enable any of these unless you are actively debugging the route code.")]
+    [Menu("Experimental Exploration Route", "Experimental route and coverage overlays used for testing exploration logic.")]
     public ExplorationRouteSettings ExplorationRoute { get; set; } = new();
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class CapturedTextDisplaySettings
+{
+    [Menu("Capture Text Only", "When enabled, captured beasts show only the capture status text. When disabled, the default mode keeps the name and price and adds a separate status line.")]
+    public ToggleNode ReplaceNameAndPriceWithStatusText { get; set; } = new(false);
+
+    [Menu("Capturing Text", "Text shown while a beast is in the first capture stage, for example Capturing.")]
+    public TextNode StatusText { get; set; } = new("Capturing");
+
+    [Menu("Captured Text", "Text shown while a beast has the second-stage captured buff and it is safe to leave the map.")]
+    public TextNode CapturedStatusText { get; set; } = new("catched");
+
+    [Menu("Capture Text Color", "Text color used for first-stage capturing text in world labels, large-map labels, and the tracked beasts window.")]
+    public ColorNode CaptureTextColor { get; set; } = new(new Color(57, 255, 20, 255));
+
+    [Menu("Captured Text Color", "Text color used for second-stage captured text when it is safe to leave the map.")]
+    public ColorNode CapturedTextColor { get; set; } = new(new Color(120, 220, 255, 255));
 }
 
 [Submenu(CollapsedByDefault = true)]
 public class MapRenderColorSettings
 {
-    [Menu("World Beast Color", "Text and ground-circle color for tracked beasts in the world when they are not being captured.")]
+    [Menu("World Beast Text Color", "Name text color for normal tracked beasts in the world.")]
     public ColorNode WorldBeastColor { get; set; } = new(new Color(180, 20, 20, 255));
 
-    [Menu("World Captured Beast Color", "Text and ground-circle color for tracked beasts in the world when they are currently being captured.")]
+    [Menu("World Captured Beast Text Color", "Name text color for tracked beasts that are currently being captured or already safely captured.")]
     public ColorNode WorldCapturedBeastColor { get; set; } = new(new Color(255, 40, 40, 255));
 
     [Menu("World Price Text Color", "Price text color for tracked beasts in the world.")]
     public ColorNode WorldPriceTextColor { get; set; } = new(new Color(255, 235, 120, 255));
 
-    [Menu("World Capture Text Color", "Color of the separate CAPTURING label text shown for beasts that are currently being captured.")]
-    public ColorNode WorldCaptureTextColor { get; set; } = new(new Color(255, 40, 40, 255));
-
-    [Menu("World Capture Ring Color", "Outer ring color for beasts that are currently being captured.")]
-    public ColorNode WorldCaptureRingColor { get; set; } = new(Color.White);
-
-    [Menu("World Text Outline Color", "Outline color used behind world text so it stays readable.")]
+    [Menu("World Text Outline Color", "Outline color drawn behind world label text to keep it readable.")]
     public ColorNode WorldTextOutlineColor { get; set; } = new(Color.Black);
 
-    [Menu("Map Marker Text Color", "Text color for large-map beast markers.")]
+    [Menu("World Beast Circle Color", "Circle color for normal tracked beasts in the world.")]
+    public ColorNode WorldBeastCircleColor { get; set; } = new(new Color(180, 20, 20, 255));
+
+    [Menu("World Capture Circle Color", "Circle color for beasts that are currently being captured.")]
+    public ColorNode WorldCaptureRingColor { get; set; } = new(Color.White);
+
+    [Menu("World Catched Circle Color", "Circle color for beasts that already have the safe-to-leave captured buff.")]
+    public ColorNode WorldCapturedCircleColor { get; set; } = new(new Color(120, 220, 255, 255));
+
+    [Menu("Map Label Text Color", "Primary text color for large-map beast labels.")]
     public ColorNode MapMarkerTextColor { get; set; } = new(new Color(180, 20, 20, 255));
 
-    [Menu("Map Marker Ring Color", "Ring color for large-map beast markers.")]
-    public ColorNode MapMarkerRingColor { get; set; } = new(new Color(180, 20, 20, 255));
-
-    [Menu("Map Marker Background Color", "Background color behind the large-map beast marker text.")]
+    [Menu("Map Label Background Color", "Background color behind large-map beast labels.")]
     public ColorNode MapMarkerBackgroundColor { get; set; } = new(new Color(0, 0, 0, 230));
 
     [Menu("Tracked Window Beast Color", "Text color for normal beasts in the tracked beasts window.")]
     public ColorNode TrackedWindowBeastColor { get; set; } = new(new Color(180, 20, 20, 255));
-
-    [Menu("Tracked Window Capture Color", "Text color for beasts that are being captured in the tracked beasts window.")]
-    public ColorNode TrackedWindowCaptureColor { get; set; } = new(new Color(255, 40, 40, 255));
 }
 
 [Submenu(CollapsedByDefault = true)]
 public class MapRenderLayoutSettings
 {
-    [Menu("World Text Line Spacing", "Vertical spacing between world-label lines such as name, price, and capture text.")]
+    [Menu("World Label Line Spacing", "Vertical spacing between world label lines such as name, price, and capture text.")]
     public RangeNode<float> WorldTextLineSpacing { get; set; } = new(18f, 8f, 40f);
 
-    [Menu("World Beast Circle Radius", "Ground-circle radius for tracked beasts in the world.")]
+    [Menu("World Beast Circle Radius", "Ground circle radius for tracked beasts in the world.")]
     public RangeNode<float> WorldBeastCircleRadius { get; set; } = new(80f, 20f, 200f);
 
-    [Menu("World Capture Ring Radius", "Highlight-ring radius for beasts that are currently being captured.")]
-    public RangeNode<float> WorldCaptureRingRadius { get; set; } = new(68f, 20f, 200f);
+    [Menu("World Circle Outline Thickness", "Outline thickness for world beast circles.")]
+    public RangeNode<float> WorldBeastCircleOutlineThickness { get; set; } = new(2f, 1f, 8f);
 
-    [Menu("Map Marker Ring Radius", "Ring radius for large-map beast markers.")]
-    public RangeNode<float> MapMarkerRingRadius { get; set; } = new(20f, 5f, 80f);
+    [Menu("World Circle Fill Opacity (%)", "Fill opacity for world beast circles.")]
+    public RangeNode<int> WorldBeastCircleFillOpacityPercent { get; set; } = new(20, 0, 100);
 
-    [Menu("Map Marker Ring Thickness", "Ring thickness for large-map beast markers.")]
-    public RangeNode<float> MapMarkerRingThickness { get; set; } = new(3f, 1f, 10f);
+    [Menu("Map Label Padding X", "Horizontal padding inside large-map label backgrounds.")]
+    public RangeNode<float> MapLabelPaddingX { get; set; } = new(4f, 0f, 20f);
+
+    [Menu("Map Label Padding Y", "Vertical padding inside large-map label backgrounds.")]
+    public RangeNode<float> MapLabelPaddingY { get; set; } = new(2f, 0f, 20f);
+
 }
 
 [Submenu(CollapsedByDefault = true)]
 public class ExplorationRouteSettings
 {
-    [Menu("⛔ Show Exploration Route", "DO NOT USE. Broken test overlay. Draws a coverage path on the large map. Never enable this in normal play.")]
+    [Menu("Show Route On Large Map", "Experimental overlay that draws the current exploration route on the large map.")]
     public ToggleNode ShowExplorationRoute { get; set; } = new(false);
 
-    [Menu("⛔ Route Detection Radius (grid units)", "DO NOT USE. Test-only value that drives waypoint spacing and the yellow radius circle.")]
+    [Menu("Show Route Coverage On MiniMap", "Experimental overlay that draws the current exploration route and each waypoint's coverage radius on the minimap.")]
+    public ToggleNode ShowCoverageOnMiniMap { get; set; } = new(false);
+
+    [Menu("Detection Radius (Grid Units)", "Coverage radius used for exploration waypoints and the route coverage circles.")]
     public RangeNode<int> DetectionRadius { get; set; } = new(186, 20, 500);
 
-    [Menu("⛔ Waypoint Auto-Visit Radius (grid units)", "DO NOT USE. Test-only value — distance at which a waypoint is marked visited.")]
+    [Menu("Waypoint Visit Radius (Grid Units)", "Distance from the player at which a waypoint is treated as visited.")]
     public RangeNode<int> WaypointVisitRadius { get; set; } = new(35, 5, 200);
 
-    [Menu("⛔ Show Path To Next Waypoint (Radar)", "DO NOT USE. Test-only Radar A* path to the next exploration waypoint.")]
+    [Menu("Show Radar Path To Next Waypoint", "Experimental overlay that draws the Radar path to the next exploration waypoint.")]
     public ToggleNode ShowPathsToBeasts { get; set; } = new(false);
 }

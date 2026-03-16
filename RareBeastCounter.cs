@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using ExileCore;
+using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
@@ -18,6 +19,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 {
     private const string CounterLabel = "Beasts Found";
     private const string MapTimePrefix = "Map Time:";
+    private const string MissingTrackedBeastName = "\0";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
     private static readonly TrackedBeast[] AllRedBeasts =
@@ -85,6 +87,8 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         new("Vivid Abberarach",      ["HarvestPlatedScorpionT3"],   "d ab"),
         new("Black Mórrigan",        ["GullGoliathBestiary", "Morrigan"], "k m"),
     ];
+    private static readonly (string Pattern, string BeastName)[] TrackedBeastMetadataLookup =
+        AllRedBeasts.SelectMany(beast => beast.MetadataPatterns.Select(pattern => (pattern, beast.Name))).ToArray();
 
     private static readonly string[] DefaultEnabledBeasts =
     [
@@ -102,6 +106,8 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     private readonly HashSet<long> _countedRareBeastIds = new();
     private readonly Dictionary<long, Entity> _trackedBeastEntities = new();
+    private readonly Dictionary<string, string> _trackedBeastNameCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly List<TrackedBeastRenderInfo> _trackedBeastRenderBuffer = new();
     private readonly Dictionary<string, int> _valuableBeastCounts = AllRedBeasts.ToDictionary(x => x.Name, _ => 0);
     private bool _analyticsCollapsed;
 
@@ -120,6 +126,15 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private bool _wasBestiaryTabVisible;
     private Type _cachedGameType;
     private System.Reflection.PropertyInfo _cachedIsEscapeStateProperty;
+
+    private enum BeastCaptureState
+    {
+        None,
+        Capturing,
+        Captured,
+    }
+
+    private readonly record struct TrackedBeastRenderInfo(Entity Entity, Positioned Positioned, string BeastName, BeastCaptureState CaptureState);
 
     public RareBeastCounter()
     {
@@ -204,6 +219,29 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         _trackedBeastEntities.Remove(entity.Id);
     }
 
+    private IReadOnlyList<TrackedBeastRenderInfo> CollectTrackedBeastRenderInfo()
+    {
+        _trackedBeastRenderBuffer.Clear();
+
+        foreach (var (_, entity) in _trackedBeastEntities)
+        {
+            if (!entity.IsValid) continue;
+            if (!TryGetTrackedBeastNameCached(entity.Metadata, out var beastName)) continue;
+            if (Settings.MapRender.ShowEnabledOnly.Value && !Settings.BeastPrices.EnabledBeasts.Contains(beastName)) continue;
+
+            var positioned = entity.GetComponent<Positioned>();
+            if (positioned == null) continue;
+
+            _trackedBeastRenderBuffer.Add(new TrackedBeastRenderInfo(
+                entity,
+                positioned,
+                beastName,
+                GetBeastCaptureState(entity)));
+        }
+
+        return _trackedBeastRenderBuffer;
+    }
+
     public override void Render()
     {
         var now = DateTime.UtcNow;
@@ -217,9 +255,24 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             Task.Run(FetchBeastPricesAsync);
         }
 
-        if (Settings.MapRender.ShowBeastLabelsInWorld.Value) DrawInWorldBeasts();
-        if (Settings.MapRender.ShowBeastsOnMap.Value || Settings.MapRender.ExplorationRoute.ShowExplorationRoute.Value || Settings.MapRender.ExplorationRoute.ShowPathsToBeasts.Value) DrawBeastsOnLargeMap();
-        if (Settings.MapRender.ShowTrackedBeastsWindow.Value) DrawTrackedBeastsWindow();
+        var shouldCollectTrackedBeastRenderInfo =
+            Settings.MapRender.ShowBeastLabelsInWorld.Value ||
+            Settings.MapRender.ShowBeastsOnMap.Value ||
+            Settings.MapRender.ShowTrackedBeastsWindow.Value;
+        IReadOnlyList<TrackedBeastRenderInfo> trackedBeasts = Array.Empty<TrackedBeastRenderInfo>();
+        if (shouldCollectTrackedBeastRenderInfo)
+        {
+            trackedBeasts = CollectTrackedBeastRenderInfo();
+        }
+
+        if (Settings.MapRender.ShowBeastLabelsInWorld.Value && trackedBeasts.Count > 0) DrawInWorldBeasts(trackedBeasts);
+        if (Settings.MapRender.ShowBeastsOnMap.Value ||
+            Settings.MapRender.ExplorationRoute.ShowExplorationRoute.Value ||
+            Settings.MapRender.ExplorationRoute.ShowPathsToBeasts.Value ||
+            Settings.MapRender.ExplorationRoute.ShowCoverageOnMiniMap.Value)
+            DrawBeastsOnLargeMap(trackedBeasts);
+        if (Settings.MapRender.ShowStylePreviewWindow.Value) DrawMapRenderStylePreviewWindow();
+        if (Settings.MapRender.ShowTrackedBeastsWindow.Value && trackedBeasts.Count > 0) DrawTrackedBeastsWindow(trackedBeasts);
         if (Settings.MapRender.ShowPricesInInventory.Value) DrawInventoryBeasts();
         if (Settings.MapRender.ShowPricesInStash.Value) DrawStashBeasts();
         DrawMerchantBeasts();
@@ -236,11 +289,13 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         if (shouldRenderCounterAndMessage)
         {
             BuildCounterDisplay(out var counterText, out var allBeastsFound);
-            var showCompletedCounterStyle = allBeastsFound || Settings.CompletedCounter.ShowWhileNotComplete.Value;
+            var completedCounter = Settings.CounterWindow.CompletedStyle;
+            var completedMessage = Settings.CounterWindow.CompletedMessage;
+            var showCompletedCounterStyle = allBeastsFound || completedCounter.ShowWhileNotComplete.Value;
 
-            var counterTextColor = showCompletedCounterStyle ? Settings.CompletedCounter.TextColor.Value : Settings.CounterWindow.TextColor.Value;
-            var counterBorderColor = showCompletedCounterStyle ? Settings.CompletedCounter.BorderColor.Value : Settings.CounterWindow.BorderColor.Value;
-            var counterTextScale = showCompletedCounterStyle ? Settings.CompletedCounter.TextScale.Value : Settings.CounterWindow.TextScale.Value;
+            var counterTextColor = showCompletedCounterStyle ? completedCounter.TextColor.Value : Settings.CounterWindow.TextColor.Value;
+            var counterBorderColor = showCompletedCounterStyle ? completedCounter.BorderColor.Value : Settings.CounterWindow.BorderColor.Value;
+            var counterTextScale = showCompletedCounterStyle ? completedCounter.TextScale.Value : Settings.CounterWindow.TextScale.Value;
 
             DrawOverlayWindow(
                 "##RareBeastCounterOverlay",
@@ -256,24 +311,24 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
                 Settings.CounterWindow.BackgroundColor.Value);
 
             var shouldShowCompletedMessage =
-                Settings.CompletedMessageWindow.Show.Value &&
-                !string.IsNullOrWhiteSpace(Settings.CompletedMessageWindow.Text.Value) &&
-                (allBeastsFound || Settings.CompletedMessageWindow.ShowWhileNotComplete.Value);
+                completedMessage.Show.Value &&
+                !string.IsNullOrWhiteSpace(completedMessage.Text.Value) &&
+                (allBeastsFound || completedMessage.ShowWhileNotComplete.Value);
 
             if (shouldShowCompletedMessage)
             {
                 DrawOverlayWindow(
                     "##RareBeastCounterCompletedMessageOverlay",
-                    Settings.CompletedMessageWindow.Text.Value,
-                    Settings.CompletedMessageWindow.XPos.Value,
-                    Settings.CompletedMessageWindow.YPos.Value,
-                    Settings.CompletedMessageWindow.Padding.Value,
-                    Settings.CompletedMessageWindow.BorderThickness.Value,
-                    Settings.CompletedMessageWindow.BorderRounding.Value,
-                    Settings.CompletedMessageWindow.TextScale.Value,
-                    Settings.CompletedMessageWindow.TextColor.Value,
-                    Settings.CompletedMessageWindow.BorderColor.Value,
-                    Settings.CompletedMessageWindow.BackgroundColor.Value);
+                    completedMessage.Text.Value,
+                    completedMessage.XPos.Value,
+                    completedMessage.YPos.Value,
+                    completedMessage.Padding.Value,
+                    completedMessage.BorderThickness.Value,
+                    completedMessage.BorderRounding.Value,
+                    completedMessage.TextScale.Value,
+                    completedMessage.TextColor.Value,
+                    completedMessage.BorderColor.Value,
+                    completedMessage.BackgroundColor.Value);
             }
         }
 
