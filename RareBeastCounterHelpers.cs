@@ -20,6 +20,11 @@ internal static class RareBeastCounterHelpers
         return new Vector4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f);
     }
 
+    public static uint ToImGuiColorU32(Color color)
+    {
+        return ImGuiNET.ImGui.ColorConvertFloat4ToU32(ToImGuiColor(color));
+    }
+
     public static Vector2[] CreateUnitCirclePoints(int segments, bool closeLoop = true)
     {
         var pointCount = closeLoop ? segments + 1 : segments;

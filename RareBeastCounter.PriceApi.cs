@@ -12,8 +12,11 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter
 {
+    private static readonly Vector4 EnabledBeastTextColor = new(0.4f, 1f, 0.4f, 1f);
     private static readonly HttpClient HttpClient = new();
     private Dictionary<string, float> _beastPrices = AllRedBeasts.ToDictionary(x => x.Name, _ => -1f);
+    private Dictionary<string, string> _beastPriceTexts = new(StringComparer.OrdinalIgnoreCase);
+    private TrackedBeast[] _sortedBeastsByPrice = AllRedBeasts;
     private bool _isFetchingPrices;
     private DateTime _lastPriceFetchAttempt = DateTime.MinValue;
 
@@ -34,30 +37,26 @@ public partial class RareBeastCounter
         ImGui.TableSetupScrollFreeze(0, 1);
         ImGui.TableHeadersRow();
 
-        var sorted = AllRedBeasts
-            .OrderByDescending(b => _beastPrices.TryGetValue(b.Name, out var p) ? p : -1f);
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
 
-        foreach (var beast in sorted)
+        foreach (var beast in _sortedBeastsByPrice)
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
 
-            var isEnabled = Settings.BeastPrices.EnabledBeasts.Contains(beast.Name);
+            var isEnabled = enabledBeasts.Contains(beast.Name);
             if (ImGui.Checkbox($"##{beast.Name}_chk", ref isEnabled))
             {
-                if (isEnabled) Settings.BeastPrices.EnabledBeasts.Add(beast.Name);
-                else Settings.BeastPrices.EnabledBeasts.Remove(beast.Name);
+                if (isEnabled) enabledBeasts.Add(beast.Name);
+                else enabledBeasts.Remove(beast.Name);
             }
 
             ImGui.TableNextColumn();
-            var priceText = _beastPrices.TryGetValue(beast.Name, out var price) && price >= 0
-                ? $"{price:0}c"
-                : "?";
-            ImGui.Text(priceText);
+            ImGui.Text(TryGetBeastPriceText(beast.Name, out var priceText) ? priceText : "?");
 
             ImGui.TableNextColumn();
             if (isEnabled)
-                ImGui.TextColored(new Vector4(0.4f, 1f, 0.4f, 1f), beast.Name);
+                ImGui.TextColored(EnabledBeastTextColor, beast.Name);
             else
                 ImGui.TextDisabled(beast.Name);
         }
@@ -93,6 +92,7 @@ public partial class RareBeastCounter
             }
 
             _beastPrices = updated;
+            RebuildPriceCaches(updated);
             Settings.BeastPrices.LastUpdated = DateTime.Now.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
             DebugWindow.LogMsg($"[RareBeastCounter] Beast prices updated ({Settings.BeastPrices.LastUpdated}).");
         }
@@ -104,6 +104,23 @@ public partial class RareBeastCounter
         {
             _isFetchingPrices = false;
         }
+    }
+
+    private void RebuildPriceCaches(Dictionary<string, float> prices)
+    {
+        var priceTexts = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var beast in AllRedBeasts)
+        {
+            if (prices.TryGetValue(beast.Name, out var price) && price >= 0)
+            {
+                priceTexts[beast.Name] = $"{price:0}c";
+            }
+        }
+
+        _beastPriceTexts = priceTexts;
+        _sortedBeastsByPrice = AllRedBeasts
+            .OrderByDescending(b => prices.TryGetValue(b.Name, out var price) ? price : -1f)
+            .ToArray();
     }
 
     private class PoeNinjaBeastsResponse

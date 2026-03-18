@@ -5,49 +5,49 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter
 {
-    private bool ShouldRenderCounterAndMessageOverlays()
+    private void GetOverlayVisibility(out bool shouldRenderCounterAndMessage, out bool shouldRenderAnalytics)
     {
+        shouldRenderCounterAndMessage = false;
+        shouldRenderAnalytics = false;
+
         if (!TryGetIngameUi(out var ingameUi))
         {
-            return false;
+            return;
         }
 
-        if (Settings.Visibility.HideInHideout.Value && GameController.Area?.CurrentArea?.IsHideout == true)
+        var visibility = Settings.Visibility;
+        var fullscreenHidden = visibility.HideOnFullscreenPanels.Value && HasVisibleFullscreenPanels(ingameUi);
+        if (fullscreenHidden)
         {
-            return false;
+            return;
         }
 
-        if (Settings.Visibility.HideOnFullscreenPanels.Value && HasVisibleFullscreenPanels(ingameUi))
+        shouldRenderAnalytics = !IsConfiguredSidePanelOpen(
+            ingameUi,
+            visibility.HideAnalyticsOnOpenLeftPanel.Value,
+            visibility.HideAnalyticsOnOpenRightPanel.Value);
+
+        if (visibility.HideInHideout.Value && GameController.Area?.CurrentArea?.IsHideout == true)
         {
-            return false;
+            return;
         }
 
-        if (IsConfiguredCounterSidePanelOpen(ingameUi))
-        {
-            return false;
-        }
+        shouldRenderCounterAndMessage = !IsConfiguredSidePanelOpen(
+            ingameUi,
+            visibility.HideOnOpenLeftPanel.Value,
+            visibility.HideOnOpenRightPanel.Value);
+    }
 
-        return true;
+    private bool ShouldRenderCounterAndMessageOverlays()
+    {
+        GetOverlayVisibility(out var shouldRenderCounterAndMessage, out _);
+        return shouldRenderCounterAndMessage;
     }
 
     private bool ShouldRenderAnalyticsOverlay()
     {
-        if (!TryGetIngameUi(out var ingameUi))
-        {
-            return false;
-        }
-
-        if (Settings.Visibility.HideOnFullscreenPanels.Value && HasVisibleFullscreenPanels(ingameUi))
-        {
-            return false;
-        }
-
-        if (IsConfiguredAnalyticsSidePanelOpen(ingameUi))
-        {
-            return false;
-        }
-
-        return true;
+        GetOverlayVisibility(out _, out var shouldRenderAnalytics);
+        return shouldRenderAnalytics;
     }
 
     private bool TryGetIngameUi(out IngameUIElements ingameUi)

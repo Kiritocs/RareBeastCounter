@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Windows.Forms;
 using ExileCore.Shared.Attributes;
 using ExileCore.Shared.Interfaces;
 using ExileCore.Shared.Nodes;
@@ -29,6 +30,9 @@ public class RareBeastCounterSettings : ISettings
 
     [Menu("Bestiary Clipboard", "Automatically copy a Bestiary search regex when the Bestiary tab is opened.")]
     public BestiaryClipboardSettings BestiaryClipboard { get; set; } = new();
+
+    [Menu("Stash Automation", "Restock maps and beast scarabs from configured stash tabs and item names.")]
+    public StashAutomationSettings StashAutomation { get; set; } = new();
 }
 
 [Submenu(CollapsedByDefault = true)]
@@ -201,9 +205,25 @@ public class BeastPricesSettings
     [Menu("Fetch Prices", "Manually fetch current beast prices from poe.ninja.")]
     public ButtonNode FetchPrices { get; set; } = new();
 
-    public string LastUpdated { get; set; } = "never";
+    [JsonIgnore]
+    internal string LastUpdated { get; set; } = "never";
 
-    public HashSet<string> EnabledBeasts { get; set; } = new();
+    [JsonIgnore]
+    internal HashSet<string> EnabledBeasts { get; set; } = new();
+
+    [JsonProperty("LastUpdated")]
+    private string SavedLastUpdated
+    {
+        get => LastUpdated;
+        set => LastUpdated = value ?? "never";
+    }
+
+    [JsonProperty("EnabledBeasts")]
+    private List<string> SavedEnabledBeasts
+    {
+        get => new(EnabledBeasts);
+        set => EnabledBeasts = value != null ? new HashSet<string>(value) : new HashSet<string>();
+    }
 
     [Menu("Enabled Beasts", "Choose which beasts count as enabled for filtering, analytics, and Bestiary auto-regex generation.")]
     [JsonIgnore] public CustomNode BeastPickerPanel { get; set; } = new();
@@ -220,6 +240,65 @@ public class BestiaryClipboardSettings
 
     [Menu("Manual Regex", "Regex copied to the clipboard when automatic regex generation is disabled.")]
     public TextNode BeastRegex { get; set; } = new("id v|le m|ld h|s ho|k m|an fi|ul, f|cic c|nd sc|s, f|d bra|l pla|n, f|l cru| cy");
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class StashAutomationSettings
+{
+    [Menu("Enable", "Enable stash restock automation.")]
+    public ToggleNode Enabled { get; set; } = new(false);
+
+    [Menu("Restock Inventory", "Switch to the configured stash tabs and ctrl-click matching stacks until the requested amounts are moved.")]
+    public ButtonNode RestockInventory { get; set; } = new();
+
+    [Menu("Restock Hotkey", "Hotkey that triggers the same restock action as the Restock Inventory button.")]
+    public HotkeyNode RestockHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Click Delay (ms)", "Delay between ctrl-click transfers.")]
+    public RangeNode<int> ClickDelayMs { get; set; } = new(0, 0, 250);
+
+    [Menu("Tab Switch Delay (ms)", "Delay after switching stash tabs before looking for items.")]
+    public RangeNode<int> TabSwitchDelayMs { get; set; } = new(60, 0, 500);
+
+    [Menu("Flat Extra Delay (ms)", "Additional fixed delay added on top of every automation delay and timeout.")]
+    public RangeNode<int> FlatExtraDelayMs { get; set; } = new(0, 0, 500);
+
+    [Menu("Debug Logging", "Write automation status updates to the log for troubleshooting.")]
+    public ToggleNode DebugLogging { get; set; } = new(false);
+
+    [Menu("Target 1", "Source settings for the first customizable restock target.")]
+    public StashAutomationTargetSettings Target1 { get; set; } = new() { ItemName = new TextNode("Map (Tier 16)"), Quantity = new RangeNode<int>(20, 0, 200) };
+
+    [Menu("Target 2", "Source settings for the second customizable restock target.")]
+    public StashAutomationTargetSettings Target2 { get; set; } = new() { ItemName = new TextNode("Bestiary Scarab of the Herd"), Quantity = new RangeNode<int>(40, 0, 200) };
+
+    [Menu("Target 3", "Source settings for the third customizable restock target.")]
+    public StashAutomationTargetSettings Target3 { get; set; } = new() { ItemName = new TextNode("Bestiary Scarab of Duplicating"), Quantity = new RangeNode<int>(20, 0, 200) };
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class StashAutomationTargetSettings
+{
+    [Menu("Enable Target", "Enable or disable this restock target.")]
+    public ToggleNode Enabled { get; set; } = new(true);
+
+    [Menu("Stash Tab", "Choose the stash tab from a dropdown while the stash is open.")]
+    [JsonIgnore] public CustomNode TabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedTabName { get; set; } = new(string.Empty);
+
+    [JsonProperty("TabName")]
+    private string SavedTabName
+    {
+        get => SelectedTabName.Value;
+        set => SelectedTabName.Value = value ?? string.Empty;
+    }
+
+    [Menu("Item Name", "Item Base Name to pull from the selected stash tab.")]
+    public TextNode ItemName { get; set; } = new(string.Empty);
+
+    [Menu("Quantity", "Requested total amount to transfer for this target.")]
+    public RangeNode<int> Quantity { get; set; } = new(20, 0, 200);
 }
 
 [Submenu(CollapsedByDefault = true)]

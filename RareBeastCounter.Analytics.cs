@@ -15,7 +15,8 @@ public partial class RareBeastCounter
             var directory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config", "RareBeastCounterSessions");
             Directory.CreateDirectory(directory);
 
-            var analyticsLines = BuildAnalyticsLines(includeBeastBreakdown: true);
+            var analyticsLines = new List<string>(4 + Settings.BeastPrices.EnabledBeasts.Count);
+            BuildAnalyticsLines(analyticsLines, includeBeastBreakdown: true);
             var now = DateTime.Now;
 
             var fileName = $"RareBeastCounter_{now:yyyyMMdd_HHmmss}.csv";
@@ -107,10 +108,12 @@ public partial class RareBeastCounter
         return false;
     }
 
-    private List<string> BuildAnalyticsLines(bool includeBeastBreakdown = true)
+    private void BuildAnalyticsLines(List<string> lines, bool includeBeastBreakdown = true)
     {
+        lines.Clear();
+
         var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
-        var lines = new List<string>(includeBeastBreakdown ? 4 + enabledBeasts.Count : 1);
+        lines.Capacity = Math.Max(lines.Capacity, includeBeastBreakdown ? 4 + enabledBeasts.Count : 1);
         var now = DateTime.UtcNow;
 
         var currentMapTime = _currentMapElapsed;
@@ -123,7 +126,7 @@ public partial class RareBeastCounter
 
         if (!includeBeastBreakdown)
         {
-            return lines;
+            return;
         }
 
         var totalSessionTime = now - _sessionStartUtc - _sessionPausedDuration;
@@ -166,7 +169,6 @@ public partial class RareBeastCounter
             lines.Add($"{tracked.Name}: {countText} / {denominatorText} red beasts = {pct.ToString("0.000", CultureInfo.InvariantCulture)}% ({freqText})");
         }
 
-        return lines;
     }
 }
 

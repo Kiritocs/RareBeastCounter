@@ -30,6 +30,7 @@ public partial class RareBeastCounter
     private double _mapScale;
     private RectangleF _mapRect;
     private ImDrawListPtr _mapDrawList;
+    private readonly Vector2[] _worldCircleScreenPoints = new Vector2[WorldCirclePoints.Length];
 
     private CancellationTokenSource _pathFindingCts = new();
     private volatile List<Vector2i> _explorationPath;
@@ -121,14 +122,17 @@ public partial class RareBeastCounter
 
     private void DrawInWorldBeasts(IReadOnlyList<TrackedBeastRenderInfo> beasts)
     {
+        var mapRender = Settings.MapRender;
+        var lineSpacing = mapRender.Layout.WorldTextLineSpacing.Value;
+        var capturedTextSettings = mapRender.CapturedText;
+        var worldPriceTextColor = mapRender.Colors.WorldPriceTextColor.Value;
+
         foreach (var beast in beasts)
         {
             var worldPos = GameController.IngameState.Data.ToWorldWithTerrainHeight(beast.Positioned.GridPosition);
             var screenPos = GameController.IngameState.Camera.WorldToScreen(worldPos);
             var hasCaptureState = beast.CaptureState != BeastCaptureState.None;
             var worldBeastColor = GetWorldBeastColor(beast.CaptureState);
-            var lineSpacing = Settings.MapRender.Layout.WorldTextLineSpacing.Value;
-            var capturedTextSettings = Settings.MapRender.CapturedText;
             var capturedStatusText = GetDisplayedCaptureStatusText(beast.CaptureState);
             var capturedStatusColor = GetDisplayedCaptureStatusColor(beast.CaptureState);
             var useStatusOnlyText = hasCaptureState && capturedTextSettings.ReplaceNameAndPriceWithStatusText.Value;
@@ -144,7 +148,7 @@ public partial class RareBeastCounter
                 var nextLineOffset = lineSpacing;
                 if (TryGetBeastPriceText(beast.BeastName, out var priceText))
                 {
-                    DrawOutlinedText(priceText, screenPos + new Vector2(0, nextLineOffset), Settings.MapRender.Colors.WorldPriceTextColor.Value);
+                    DrawOutlinedText(priceText, screenPos + new Vector2(0, nextLineOffset), worldPriceTextColor);
                     nextLineOffset += lineSpacing;
                 }
 
@@ -266,32 +270,29 @@ public partial class RareBeastCounter
     {
         var foregroundDrawList = ImGui.GetForegroundDrawList();
         var lineSpacing = Settings.MapRender.Layout.WorldTextLineSpacing.Value;
+        var hasSecondaryText = !string.IsNullOrEmpty(secondaryText);
         var primarySize = ImGui.CalcTextSize(primaryText);
-        var secondarySize = string.IsNullOrEmpty(secondaryText) ? Vector2.Zero : ImGui.CalcTextSize(secondaryText);
+        var secondarySize = hasSecondaryText ? ImGui.CalcTextSize(secondaryText) : Vector2.Zero;
         var width = Math.Max(primarySize.X, secondarySize.X);
-        var height = primarySize.Y + (string.IsNullOrEmpty(secondaryText) ? 0f : secondarySize.Y + lineSpacing * 0.25f);
+        var height = primarySize.Y + (hasSecondaryText ? secondarySize.Y + lineSpacing * 0.25f : 0f);
         var half = new Vector2(width / 2f, height / 2f);
         var pad = new Vector2(Settings.MapRender.Layout.MapLabelPaddingX.Value, Settings.MapRender.Layout.MapLabelPaddingY.Value);
         var backgroundColor = Settings.MapRender.Colors.MapMarkerBackgroundColor.Value;
         foregroundDrawList.AddRectFilled(pos - half - pad, pos + half + pad,
-            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
-                backgroundColor.R / 255f,
-                backgroundColor.G / 255f,
-                backgroundColor.B / 255f,
-                backgroundColor.A / 255f)));
+            RareBeastCounterHelpers.ToImGuiColorU32(backgroundColor));
 
-        var primaryPos = new Vector2(pos.X - primarySize.X / 2f, string.IsNullOrEmpty(secondaryText) ? pos.Y - primarySize.Y / 2f : pos.Y - height / 2f);
+        var primaryPos = new Vector2(pos.X - primarySize.X / 2f, hasSecondaryText ? pos.Y - height / 2f : pos.Y - primarySize.Y / 2f);
         foregroundDrawList.AddText(
             primaryPos,
-            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(primaryColor.R / 255f, primaryColor.G / 255f, primaryColor.B / 255f, 1f)),
+            RareBeastCounterHelpers.ToImGuiColorU32(primaryColor),
             primaryText);
 
-        if (!string.IsNullOrEmpty(secondaryText))
+        if (hasSecondaryText)
         {
             var secondaryPos = new Vector2(pos.X - secondarySize.X / 2f, primaryPos.Y + primarySize.Y + lineSpacing * 0.25f);
             foregroundDrawList.AddText(
                 secondaryPos,
-                ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(secondaryColor.R / 255f, secondaryColor.G / 255f, secondaryColor.B / 255f, 1f)),
+                RareBeastCounterHelpers.ToImGuiColorU32(secondaryColor),
                 secondaryText);
         }
     }
@@ -381,33 +382,30 @@ public partial class RareBeastCounter
         var pos = origin + size / 2f;
         var lineSpacing = Settings.MapRender.Layout.WorldTextLineSpacing.Value;
         var primarySize = ImGui.CalcTextSize(primaryText);
-        var secondarySize = string.IsNullOrEmpty(secondaryText) ? Vector2.Zero : ImGui.CalcTextSize(secondaryText);
+        var hasSecondaryText = !string.IsNullOrEmpty(secondaryText);
+        var secondarySize = hasSecondaryText ? ImGui.CalcTextSize(secondaryText) : Vector2.Zero;
         var width = Math.Max(primarySize.X, secondarySize.X);
-        var height = primarySize.Y + (string.IsNullOrEmpty(secondaryText) ? 0f : secondarySize.Y + lineSpacing * 0.25f);
+        var height = primarySize.Y + (hasSecondaryText ? secondarySize.Y + lineSpacing * 0.25f : 0f);
         var half = new Vector2(width / 2f, height / 2f);
         var pad = new Vector2(Settings.MapRender.Layout.MapLabelPaddingX.Value, Settings.MapRender.Layout.MapLabelPaddingY.Value);
         var backgroundColor = Settings.MapRender.Colors.MapMarkerBackgroundColor.Value;
         drawList.AddRectFilled(pos - half - pad, pos + half + pad,
-            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(
-                backgroundColor.R / 255f,
-                backgroundColor.G / 255f,
-                backgroundColor.B / 255f,
-                backgroundColor.A / 255f)));
+            RareBeastCounterHelpers.ToImGuiColorU32(backgroundColor));
 
         var primaryColor = captureState != BeastCaptureState.None && Settings.MapRender.CapturedText.ReplaceNameAndPriceWithStatusText.Value
             ? GetDisplayedCaptureStatusColor(captureState)
             : Settings.MapRender.Colors.MapMarkerTextColor.Value;
-        var primaryPos = new Vector2(pos.X - primarySize.X / 2f, string.IsNullOrEmpty(secondaryText) ? pos.Y - primarySize.Y / 2f : pos.Y - height / 2f);
+        var primaryPos = new Vector2(pos.X - primarySize.X / 2f, hasSecondaryText ? pos.Y - height / 2f : pos.Y - primarySize.Y / 2f);
         drawList.AddText(primaryPos,
-            ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(primaryColor.R / 255f, primaryColor.G / 255f, primaryColor.B / 255f, 1f)),
+            RareBeastCounterHelpers.ToImGuiColorU32(primaryColor),
             primaryText);
 
-        if (!string.IsNullOrEmpty(secondaryText))
+        if (hasSecondaryText)
         {
             var captureTextColor = GetDisplayedCaptureStatusColor(captureState);
             var secondaryPos = new Vector2(pos.X - secondarySize.X / 2f, primaryPos.Y + primarySize.Y + lineSpacing * 0.25f);
             drawList.AddText(secondaryPos,
-                ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(captureTextColor.R / 255f, captureTextColor.G / 255f, captureTextColor.B / 255f, 1f)),
+                RareBeastCounterHelpers.ToImGuiColorU32(captureTextColor),
                 secondaryText);
         }
     }
@@ -450,9 +448,9 @@ public partial class RareBeastCounter
         var radius = 8f + configuredRadius / 200f * 18f;
         var circleColor = GetWorldBeastCircleColor(captureState);
 
-        var outlineColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(circleColor.R / 255f, circleColor.G / 255f, circleColor.B / 255f, 1f));
+        var outlineColor = RareBeastCounterHelpers.ToImGuiColorU32(circleColor);
         var fillOpacity = Settings.MapRender.Layout.WorldBeastCircleFillOpacityPercent.Value / 100f;
-        var fillColor = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(circleColor.R / 255f, circleColor.G / 255f, circleColor.B / 255f, fillOpacity));
+        var fillColor = RareBeastCounterHelpers.ToImGuiColorU32(circleColor with { A = Color.ToByte((int)(fillOpacity * 255)) });
         drawList.AddCircleFilled(center, radius, fillColor, 24);
         drawList.AddCircle(center, radius, outlineColor, 24, Settings.MapRender.Layout.WorldBeastCircleOutlineThickness.Value);
     }
@@ -462,8 +460,8 @@ public partial class RareBeastCounter
         var textSize = ImGui.CalcTextSize(text);
         var topLeft = centerPosition - textSize / 2f;
         var outlineColor = Settings.MapRender.Colors.WorldTextOutlineColor.Value;
-        var outlineU32 = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(outlineColor.R / 255f, outlineColor.G / 255f, outlineColor.B / 255f, outlineColor.A / 255f));
-        var textU32 = ImGui.ColorConvertFloat4ToU32(new System.Numerics.Vector4(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f));
+        var outlineU32 = RareBeastCounterHelpers.ToImGuiColorU32(outlineColor);
+        var textU32 = RareBeastCounterHelpers.ToImGuiColorU32(color);
 
         drawList.AddText(topLeft + new Vector2(-1, -1), outlineU32, text);
         drawList.AddText(topLeft + new Vector2(-1, 1), outlineU32, text);
@@ -498,6 +496,8 @@ public partial class RareBeastCounter
     {
         if (beasts.Count == 0) return;
 
+        var trackedWindowBeastColor = RareBeastCounterHelpers.ToImGuiColor(GetTrackedWindowBeastColor());
+
         ImGui.SetNextWindowBgAlpha(0.6f);
         ImGui.Begin("##RareBeastTrackerWindow", ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.AlwaysAutoResize);
 
@@ -511,9 +511,9 @@ public partial class RareBeastCounter
             {
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
-                ImGui.Text(_beastPrices.TryGetValue(beast.BeastName, out var price) && price >= 0 ? $"{price:0}c" : "?");
+                ImGui.Text(TryGetBeastPriceText(beast.BeastName, out var priceText) ? priceText : "?");
                 ImGui.TableNextColumn();
-                ImGui.TextColored(RareBeastCounterHelpers.ToImGuiColor(GetTrackedWindowBeastColor()), beast.BeastName);
+                ImGui.TextColored(trackedWindowBeastColor, beast.BeastName);
                 if (beast.CaptureState != BeastCaptureState.None)
                 {
                     ImGui.SameLine(0, 0);
@@ -629,17 +629,16 @@ public partial class RareBeastCounter
 
     private void DrawFilledCircleInWorld(Vector3 position, float radius, Color color)
     {
-        var pts = new Vector2[WorldCirclePoints.Length];
         for (var i = 0; i < WorldCirclePoints.Length; i++)
         {
             var point = WorldCirclePoints[i];
-            pts[i] = GameController.Game.IngameState.Camera.WorldToScreen(
+            _worldCircleScreenPoints[i] = GameController.Game.IngameState.Camera.WorldToScreen(
                 position + new Vector3(point.X * radius, point.Y * radius, 0));
         }
 
         var fillOpacity = Settings.MapRender.Layout.WorldBeastCircleFillOpacityPercent.Value / 100f;
-        Graphics.DrawConvexPolyFilled(pts, color with { A = Color.ToByte((int)(fillOpacity * 255)) });
-        Graphics.DrawPolyLine(pts, color, Settings.MapRender.Layout.WorldBeastCircleOutlineThickness.Value);
+        Graphics.DrawConvexPolyFilled(_worldCircleScreenPoints, color with { A = Color.ToByte((int)(fillOpacity * 255)) });
+        Graphics.DrawPolyLine(_worldCircleScreenPoints, color, Settings.MapRender.Layout.WorldBeastCircleOutlineThickness.Value);
     }
 
     private static BeastCaptureState GetBeastCaptureState(Entity entity)
@@ -656,9 +655,8 @@ public partial class RareBeastCounter
 
     private bool TryGetBeastPriceText(string beastName, out string priceText)
     {
-        if (_beastPrices.TryGetValue(beastName, out var price) && price >= 0)
+        if (_beastPriceTexts.TryGetValue(beastName, out priceText))
         {
-            priceText = $"{price.ToString("0", CultureInfo.InvariantCulture)}c";
             return true;
         }
 
@@ -676,7 +674,7 @@ public partial class RareBeastCounter
         Graphics.DrawText(text, position, color, FontAlign.Center);
     }
 
-    private string GetMapMarkerLabel(string beastName, bool isBeingCaptured)
+    private string GetMapMarkerLabel(string beastName)
     {
         var displayName = beastName;
         if (Settings.MapRender.ShowNameInsteadOfPrice.Value)
@@ -719,7 +717,7 @@ public partial class RareBeastCounter
     {
         if (captureState == BeastCaptureState.None)
         {
-            primaryText = GetMapMarkerLabel(beastName, false);
+            primaryText = GetMapMarkerLabel(beastName);
             secondaryText = null;
             return;
         }
@@ -731,7 +729,7 @@ public partial class RareBeastCounter
             return;
         }
 
-        primaryText = GetMapMarkerLabel(beastName, false);
+        primaryText = GetMapMarkerLabel(beastName);
         secondaryText = GetDisplayedCaptureStatusText(captureState);
     }
 

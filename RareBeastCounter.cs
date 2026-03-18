@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using System.Windows.Forms;
 using ExileCore;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory;
@@ -108,8 +109,11 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private readonly Dictionary<long, Entity> _trackedBeastEntities = new();
     private readonly Dictionary<string, string> _trackedBeastNameCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<TrackedBeastRenderInfo> _trackedBeastRenderBuffer = new();
+    private readonly List<string> _analyticsLineBuffer = new();
+    private readonly StringBuilder _analyticsTextBuilder = new();
     private readonly Dictionary<string, int> _valuableBeastCounts = AllRedBeasts.ToDictionary(x => x.Name, _ => 0);
     private bool _analyticsCollapsed;
+    private bool _restockHotkeyWasDown;
 
     private int _rareBeastsFound;
     private int _sessionBeastsFound;
@@ -143,29 +147,58 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     public override void OnLoad()
     {
-        _sessionStartUtc = DateTime.UtcNow;
+        var now = DateTime.UtcNow;
+        _sessionStartUtc = now;
 
+        InitializeCurrentAreaTracking(now);
+
+        var analyticsWindow = Settings.AnalyticsWindow;
+        analyticsWindow.ResetSession.OnPressed = ResetSessionAnalytics;
+        analyticsWindow.SaveSessionToFile.OnPressed = SaveSessionSnapshotToFile;
+        analyticsWindow.ResetMapAverage.OnPressed = ResetMapAverageAnalytics;
+
+        var beastPrices = Settings.BeastPrices;
+        beastPrices.FetchPrices.OnPressed = QueuePriceFetch;
+        beastPrices.BeastPickerPanel.DrawDelegate = DrawBeastPickerPanel;
+
+        var stashAutomation = Settings.StashAutomation;
+        stashAutomation.RestockInventory.OnPressed = async () => await RunStashAutomationAsync();
+        stashAutomation.Target1.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target1, "Target 1"), "target1", stashAutomation.Target1);
+        stashAutomation.Target2.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target2, "Target 2"), "target2", stashAutomation.Target2);
+        stashAutomation.Target3.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target3, "Target 3"), "target3", stashAutomation.Target3);
+
+        EnsureDefaultEnabledBeasts();
+        QueuePriceFetch();
+    }
+
+    private void InitializeCurrentAreaTracking(DateTime now)
+    {
         var currentArea = GameController?.Area?.CurrentArea;
         _isCurrentAreaTrackable = currentArea is { IsTown: false, IsHideout: false };
         if (_isCurrentAreaTrackable)
         {
             _activeMapAreaHash = RareBeastCounterHelpers.TryGetAreaHashText(currentArea);
-            _currentMapStartUtc = DateTime.UtcNow;
+            _currentMapStartUtc = now;
         }
+    }
 
-        Settings.AnalyticsWindow.ResetSession.OnPressed = ResetSessionAnalytics;
-        Settings.AnalyticsWindow.SaveSessionToFile.OnPressed = SaveSessionSnapshotToFile;
-        Settings.AnalyticsWindow.ResetMapAverage.OnPressed = ResetMapAverageAnalytics;
-        Settings.BeastPrices.FetchPrices.OnPressed = async () => await FetchBeastPricesAsync();
-        Settings.BeastPrices.BeastPickerPanel.DrawDelegate = DrawBeastPickerPanel;
-
-        if (Settings.BeastPrices.EnabledBeasts.Count == 0)
+    private void EnsureDefaultEnabledBeasts()
+    {
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
+        if (enabledBeasts.Count > 0)
         {
-            foreach (var name in DefaultEnabledBeasts)
-                Settings.BeastPrices.EnabledBeasts.Add(name);
+            return;
         }
 
-        Task.Run(FetchBeastPricesAsync);
+        foreach (var name in DefaultEnabledBeasts)
+        {
+            enabledBeasts.Add(name);
+        }
+    }
+
+    private void QueuePriceFetch()
+    {
+        _ = Task.Run(FetchBeastPricesAsync);
     }
 
     public override void AreaChange(AreaInstance area)
@@ -216,18 +249,20 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     public override void EntityRemoved(Entity entity)
     {
-        _trackedBeastEntities.Remove(entity.Id);
+        _trackedBeastEntities.Remove(entity.Id); 
     }
 
     private IReadOnlyList<TrackedBeastRenderInfo> CollectTrackedBeastRenderInfo()
     {
         _trackedBeastRenderBuffer.Clear();
+        var showEnabledOnly = Settings.MapRender.ShowEnabledOnly.Value;
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
 
         foreach (var (_, entity) in _trackedBeastEntities)
         {
             if (!entity.IsValid) continue;
             if (!TryGetTrackedBeastNameCached(entity.Metadata, out var beastName)) continue;
-            if (Settings.MapRender.ShowEnabledOnly.Value && !Settings.BeastPrices.EnabledBeasts.Contains(beastName)) continue;
+            if (showEnabledOnly && !enabledBeasts.Contains(beastName)) continue;
 
             var positioned = entity.GetComponent<Positioned>();
             if (positioned == null) continue;
@@ -247,105 +282,153 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var now = DateTime.UtcNow;
         ApplyPauseMenuTimerState(now);
         ApplyBestiaryClipboard();
+        HandleAutomationHotkey();
 
-        var autoRefreshMinutes = Settings.BeastPrices.AutoRefreshMinutes.Value;
-        if (autoRefreshMinutes > 0 && !_isFetchingPrices &&
-            (now - _lastPriceFetchAttempt).TotalMinutes >= autoRefreshMinutes)
-        {
-            Task.Run(FetchBeastPricesAsync);
-        }
+        var beastPrices = Settings.BeastPrices;
+        var mapRender = Settings.MapRender;
+        var analyticsWindow = Settings.AnalyticsWindow;
 
-        var shouldCollectTrackedBeastRenderInfo =
-            Settings.MapRender.ShowBeastLabelsInWorld.Value ||
-            Settings.MapRender.ShowBeastsOnMap.Value ||
-            Settings.MapRender.ShowTrackedBeastsWindow.Value;
+        TryScheduleAutoPriceRefresh(now, beastPrices);
+
+        var shouldCollectTrackedBeastRenderInfo = ShouldCollectTrackedBeastRenderInfo(mapRender);
         IReadOnlyList<TrackedBeastRenderInfo> trackedBeasts = Array.Empty<TrackedBeastRenderInfo>();
         if (shouldCollectTrackedBeastRenderInfo)
         {
             trackedBeasts = CollectTrackedBeastRenderInfo();
         }
 
-        if (Settings.MapRender.ShowBeastLabelsInWorld.Value && trackedBeasts.Count > 0) DrawInWorldBeasts(trackedBeasts);
-        if (Settings.MapRender.ShowBeastsOnMap.Value ||
-            Settings.MapRender.ExplorationRoute.ShowExplorationRoute.Value ||
-            Settings.MapRender.ExplorationRoute.ShowPathsToBeasts.Value ||
-            Settings.MapRender.ExplorationRoute.ShowCoverageOnMiniMap.Value)
+        if (mapRender.ShowBeastLabelsInWorld.Value && trackedBeasts.Count > 0) DrawInWorldBeasts(trackedBeasts);
+        if (ShouldDrawLargeMapOverlay(mapRender))
             DrawBeastsOnLargeMap(trackedBeasts);
-        if (Settings.MapRender.ShowStylePreviewWindow.Value) DrawMapRenderStylePreviewWindow();
-        if (Settings.MapRender.ShowTrackedBeastsWindow.Value && trackedBeasts.Count > 0) DrawTrackedBeastsWindow(trackedBeasts);
-        if (Settings.MapRender.ShowPricesInInventory.Value) DrawInventoryBeasts();
-        if (Settings.MapRender.ShowPricesInStash.Value) DrawStashBeasts();
+        if (mapRender.ShowStylePreviewWindow.Value) DrawMapRenderStylePreviewWindow();
+        if (mapRender.ShowTrackedBeastsWindow.Value && trackedBeasts.Count > 0) DrawTrackedBeastsWindow(trackedBeasts);
+        if (mapRender.ShowPricesInInventory.Value) DrawInventoryBeasts();
+        if (mapRender.ShowPricesInStash.Value) DrawStashBeasts();
         DrawMerchantBeasts();
-        if (Settings.MapRender.ShowPricesInBestiary.Value) DrawBestiaryPanelPrices();
+        if (mapRender.ShowPricesInBestiary.Value) DrawBestiaryPanelPrices();
 
-        var shouldRenderCounterAndMessage = ShouldRenderCounterAndMessageOverlays();
-        var shouldRenderAnalytics = ShouldRenderAnalyticsOverlay();
+        GetOverlayVisibility(out var shouldRenderCounterAndMessage, out var shouldRenderAnalytics);
 
-        if (!shouldRenderCounterAndMessage && !(shouldRenderAnalytics && Settings.AnalyticsWindow.Show.Value))
+        if (!shouldRenderCounterAndMessage && !(shouldRenderAnalytics && analyticsWindow.Show.Value))
         {
             return;
         }
 
         if (shouldRenderCounterAndMessage)
         {
-            BuildCounterDisplay(out var counterText, out var allBeastsFound);
-            var completedCounter = Settings.CounterWindow.CompletedStyle;
-            var completedMessage = Settings.CounterWindow.CompletedMessage;
-            var showCompletedCounterStyle = allBeastsFound || completedCounter.ShowWhileNotComplete.Value;
-
-            var counterTextColor = showCompletedCounterStyle ? completedCounter.TextColor.Value : Settings.CounterWindow.TextColor.Value;
-            var counterBorderColor = showCompletedCounterStyle ? completedCounter.BorderColor.Value : Settings.CounterWindow.BorderColor.Value;
-            var counterTextScale = showCompletedCounterStyle ? completedCounter.TextScale.Value : Settings.CounterWindow.TextScale.Value;
-
-            DrawOverlayWindow(
-                "##RareBeastCounterOverlay",
-                counterText,
-                Settings.CounterWindow.XPos.Value,
-                Settings.CounterWindow.YPos.Value,
-                Settings.CounterWindow.Padding.Value,
-                Settings.CounterWindow.BorderThickness.Value,
-                Settings.CounterWindow.BorderRounding.Value,
-                counterTextScale,
-                counterTextColor,
-                counterBorderColor,
-                Settings.CounterWindow.BackgroundColor.Value);
-
-            var shouldShowCompletedMessage =
-                completedMessage.Show.Value &&
-                !string.IsNullOrWhiteSpace(completedMessage.Text.Value) &&
-                (allBeastsFound || completedMessage.ShowWhileNotComplete.Value);
-
-            if (shouldShowCompletedMessage)
-            {
-                DrawOverlayWindow(
-                    "##RareBeastCounterCompletedMessageOverlay",
-                    completedMessage.Text.Value,
-                    completedMessage.XPos.Value,
-                    completedMessage.YPos.Value,
-                    completedMessage.Padding.Value,
-                    completedMessage.BorderThickness.Value,
-                    completedMessage.BorderRounding.Value,
-                    completedMessage.TextScale.Value,
-                    completedMessage.TextColor.Value,
-                    completedMessage.BorderColor.Value,
-                    completedMessage.BackgroundColor.Value);
-            }
+            DrawCounterAndCompletedMessage();
         }
 
-        if (shouldRenderAnalytics && Settings.AnalyticsWindow.Show.Value)
+        if (shouldRenderAnalytics && analyticsWindow.Show.Value)
         {
             DrawAnalyticsWindow();
         }
     }
 
+    private void TryScheduleAutoPriceRefresh(DateTime now, BeastPricesSettings beastPrices)
+    {
+        var autoRefreshMinutes = beastPrices.AutoRefreshMinutes.Value;
+        if (autoRefreshMinutes <= 0 || _isFetchingPrices ||
+            (now - _lastPriceFetchAttempt).TotalMinutes < autoRefreshMinutes)
+        {
+            return;
+        }
+
+        QueuePriceFetch();
+    }
+
+    private void HandleAutomationHotkey()
+    {
+        var hotkey = Settings.StashAutomation.RestockHotkey.Value;
+        if (hotkey == Keys.None)
+        {
+            _restockHotkeyWasDown = false;
+            return;
+        }
+
+        var isDown = Input.IsKeyDown(hotkey);
+        if (isDown && !_restockHotkeyWasDown)
+        {
+            _ = RunStashAutomationFromHotkeyAsync();
+        }
+
+        _restockHotkeyWasDown = isDown;
+    }
+
+    private static bool ShouldCollectTrackedBeastRenderInfo(MapRenderSettings mapRender)
+    {
+        return mapRender.ShowBeastLabelsInWorld.Value ||
+               mapRender.ShowBeastsOnMap.Value ||
+               mapRender.ShowTrackedBeastsWindow.Value;
+    }
+
+    private static bool ShouldDrawLargeMapOverlay(MapRenderSettings mapRender)
+    {
+        return mapRender.ShowBeastsOnMap.Value ||
+               mapRender.ExplorationRoute.ShowExplorationRoute.Value ||
+               mapRender.ExplorationRoute.ShowPathsToBeasts.Value ||
+               mapRender.ExplorationRoute.ShowCoverageOnMiniMap.Value;
+    }
+
+    private void DrawCounterAndCompletedMessage()
+    {
+        BuildCounterDisplay(out var counterText, out var allBeastsFound);
+
+        var counterWindow = Settings.CounterWindow;
+        var completedCounter = counterWindow.CompletedStyle;
+        var completedMessage = counterWindow.CompletedMessage;
+        var showCompletedCounterStyle = allBeastsFound || completedCounter.ShowWhileNotComplete.Value;
+
+        var counterTextColor = showCompletedCounterStyle ? completedCounter.TextColor.Value : counterWindow.TextColor.Value;
+        var counterBorderColor = showCompletedCounterStyle ? completedCounter.BorderColor.Value : counterWindow.BorderColor.Value;
+        var counterTextScale = showCompletedCounterStyle ? completedCounter.TextScale.Value : counterWindow.TextScale.Value;
+
+        DrawOverlayWindow(
+            "##RareBeastCounterOverlay",
+            counterText,
+            counterWindow.XPos.Value,
+            counterWindow.YPos.Value,
+            counterWindow.Padding.Value,
+            counterWindow.BorderThickness.Value,
+            counterWindow.BorderRounding.Value,
+            counterTextScale,
+            counterTextColor,
+            counterBorderColor,
+            counterWindow.BackgroundColor.Value);
+
+        var shouldShowCompletedMessage =
+            completedMessage.Show.Value &&
+            !string.IsNullOrWhiteSpace(completedMessage.Text.Value) &&
+            (allBeastsFound || completedMessage.ShowWhileNotComplete.Value);
+
+        if (!shouldShowCompletedMessage)
+        {
+            return;
+        }
+
+        DrawOverlayWindow(
+            "##RareBeastCounterCompletedMessageOverlay",
+            completedMessage.Text.Value,
+            completedMessage.XPos.Value,
+            completedMessage.YPos.Value,
+            completedMessage.Padding.Value,
+            completedMessage.BorderThickness.Value,
+            completedMessage.BorderRounding.Value,
+            completedMessage.TextScale.Value,
+            completedMessage.TextColor.Value,
+            completedMessage.BorderColor.Value,
+            completedMessage.BackgroundColor.Value);
+    }
+
     private void DrawAnalyticsWindow()
     {
         var includeBeastBreakdown = !_analyticsCollapsed;
-        var allLines = BuildAnalyticsLines(includeBeastBreakdown);
+        var allLines = _analyticsLineBuffer;
+        BuildAnalyticsLines(allLines, includeBeastBreakdown);
         if (allLines.Count == 0) return;
 
         var displayText = includeBeastBreakdown
-            ? string.Join("\n", allLines)
+            ? BuildAnalyticsDisplayText(allLines)
             : allLines[0];
 
         var s = Settings.AnalyticsWindow;
@@ -391,6 +474,23 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         ImGui.PopStyleVar(3);
         ImGui.PopStyleColor(2);
+    }
+
+    private string BuildAnalyticsDisplayText(List<string> lines)
+    {
+        _analyticsTextBuilder.Clear();
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (i > 0)
+            {
+                _analyticsTextBuilder.Append('\n');
+            }
+
+            _analyticsTextBuilder.Append(lines[i]);
+        }
+
+        return _analyticsTextBuilder.ToString();
     }
 
     private void DrawOverlayWindow(
@@ -499,15 +599,14 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     private string BuildAutoRegexFromEnabledBeasts()
     {
-        var enabled = Settings.BeastPrices.EnabledBeasts;
-        if (enabled.Count == 0) return string.Empty;
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
+        if (enabledBeasts.Count == 0) return string.Empty;
 
-        var enabledBeastSet = new HashSet<string>(enabled);
         var builder = new StringBuilder();
 
         foreach (var beast in AllRedBeasts)
         {
-            if (!enabledBeastSet.Contains(beast.Name) || string.IsNullOrEmpty(beast.RegexFragment))
+            if (!enabledBeasts.Contains(beast.Name) || string.IsNullOrEmpty(beast.RegexFragment))
             {
                 continue;
             }
