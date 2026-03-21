@@ -23,11 +23,11 @@ public partial class RareBeastCounter
 {
     private const string SettingsFileName = "RareBeastCounter_settings.json";
     private static readonly int[] FragmentStashScarabTabPath = [2, 0, 0, 1, 1, 1, 0, 5, 0, 1];
-    private static readonly int[] MapStashTierOneToNineTabPath = [99];
-    private static readonly int[] MapStashTierTenToSixteenTabPath = [99];
-    private static readonly int[] MapStashPageTabPath = [99];
+    private static readonly int[] MapStashTierOneToNineTabPath = [2, 0, 0, 1, 1, 3, 0, 0];
+    private static readonly int[] MapStashTierTenToSixteenTabPath = [2, 0, 0, 1, 1, 3, 0, 1];
+    private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 3, 0, 3, 0];
     private static readonly int[] MapStashPageNumberPath = [0, 1];
-    private static readonly int[] MapStashPageContentPath = [99];
+    private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
     private string _lastAutomationStatusMessage;
     private bool _isAutomationRunning;
     private bool _isAutomationStopRequested;
@@ -667,7 +667,7 @@ public partial class RareBeastCounter
     private Dictionary<int, Element> GetMapStashPageTabsByNumber()
     {
         var pageTabContainer = ResolveMapStashPageTabContainer();
-        if (pageTabContainer != null && ReferenceEquals(pageTabContainer, _lastAutomationMapStashPageTabContainer) && _lastAutomationMapStashPageTabsByNumber?.Count > 0)
+        if (AreCachedMapStashPageTabsByNumberValid(pageTabContainer, _lastAutomationMapStashPageTabsByNumber))
         {
             return _lastAutomationMapStashPageTabsByNumber;
         }
@@ -816,7 +816,7 @@ public partial class RareBeastCounter
             return pageTabContainer;
         }
 
-        if (CountValidMapStashPageTabs(_lastAutomationMapStashPageTabContainer) >= 6)
+        if (IsReusableMapStashPageTabContainer(openLeftPanel, _lastAutomationMapStashPageTabContainer))
         {
             return _lastAutomationMapStashPageTabContainer;
         }
@@ -868,7 +868,7 @@ public partial class RareBeastCounter
         var openLeftPanel = GameController?.IngameState?.IngameUi?.OpenLeftPanel;
         InvalidateCachedMapStashUiStateIfNeeded();
         var pageContent = TryGetElementByPathQuietly(openLeftPanel, MapStashPageContentPath);
-        if (TryRememberMapStashPageContentRoot(pageContent, "fixed path"))
+        if (TryRememberMapStashPageContentRoot(openLeftPanel, pageContent, "fixed path"))
         {
             return pageContent;
         }
@@ -911,7 +911,7 @@ public partial class RareBeastCounter
                 }
             }
 
-            if (TryRememberMapStashPageContentRoot(dynamicContent, $"dynamic attempt {attempt + 1}"))
+            if (TryRememberMapStashPageContentRoot(openLeftPanel, dynamicContent, $"dynamic attempt {attempt + 1}"))
             {
                 return dynamicContent;
             }
@@ -991,6 +991,39 @@ public partial class RareBeastCounter
         return _lastAutomationMapStashTierGroupRoot;
     }
 
+    private bool IsReusableMapStashPageTabContainer(Element root, Element element)
+    {
+        return IsElementAttachedToRoot(root, element) && CountValidMapStashPageTabs(element) >= 6;
+    }
+
+    private bool AreCachedMapStashPageTabsByNumberValid(Element pageTabContainer, IReadOnlyDictionary<int, Element> pageTabsByNumber)
+    {
+        if (pageTabContainer == null || pageTabsByNumber == null || pageTabsByNumber.Count <= 0)
+        {
+            return false;
+        }
+
+        foreach (var entry in pageTabsByNumber)
+        {
+            if (!ReferenceEquals(entry.Value?.Parent, pageTabContainer))
+            {
+                return false;
+            }
+
+            if ((entry.Value.Parent?.Children?.IndexOf(entry.Value) ?? -1) < 0)
+            {
+                return false;
+            }
+
+            if (GetMapStashPageNumber(entry.Value) != entry.Key)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private StashAutomationDynamicHintSettings GetAutomationDynamicHints()
     {
         return Settings?.StashAutomation?.DynamicHints;
@@ -1017,7 +1050,7 @@ public partial class RareBeastCounter
         return resolvedElement;
     }
 
-    private void TryPersistMapStashElementPath(
+    private List<int> TryPersistMapStashElementPath(
         Element root,
         Element target,
         Func<StashAutomationDynamicHintSettings, List<int>> getter,
@@ -1027,25 +1060,26 @@ public partial class RareBeastCounter
         var hints = GetAutomationDynamicHints();
         if (root == null || target == null || hints == null || getter == null || setter == null)
         {
-            return;
+            return null;
         }
 
         var resolvedPath = TryFindPathFromRoot(root, target);
         if (resolvedPath == null || resolvedPath.Count <= 0)
         {
-            return;
+            return null;
         }
 
         var existingPath = getter(hints);
         if (existingPath != null && existingPath.SequenceEqual(resolvedPath))
         {
             LogAutomationDebug($"Persisted {label} path unchanged ({DescribePath(resolvedPath)}); skipping settings snapshot save.");
-            return;
+            return resolvedPath;
         }
 
         setter(hints, resolvedPath);
         LogAutomationDebug($"Persisted {label} path {DescribePath(resolvedPath)}");
         TrySaveSettingsSnapshot();
+        return resolvedPath;
     }
 
     private void TrySaveSettingsSnapshot()
@@ -1116,6 +1150,11 @@ public partial class RareBeastCounter
         }
 
         return null;
+    }
+
+    private bool IsElementAttachedToRoot(Element root, Element target)
+    {
+        return TryFindPathFromRoot(root, target) != null;
     }
 
     private Element FindFragmentScarabTabDynamically(Element root)
@@ -1222,7 +1261,7 @@ public partial class RareBeastCounter
         return CountValidMapStashPageTabs(element) < 6 && !IsMapStashTierGroupContainer(element);
     }
 
-    private bool TryRememberMapStashPageContentRoot(Element element, string source)
+    private bool TryRememberMapStashPageContentRoot(Element root, Element element, string source)
     {
         if (!IsMapStashPageContentCandidate(element))
         {
@@ -1230,12 +1269,16 @@ public partial class RareBeastCounter
         }
 
         _lastAutomationMapStashPageContentRoot = element;
-        TryPersistMapStashElementPath(
-            GameController?.IngameState?.IngameUi?.OpenLeftPanel,
+        var persistedPath = TryPersistMapStashElementPath(
+            root,
             element,
             hints => hints.MapStashPageContentRootPath,
             (hints, path) => hints.MapStashPageContentRootPath = path,
             "map stash page content root");
+        if (persistedPath == null)
+        {
+            LogAutomationDebug($"Could not capture map stash page content root path from discovery root. source={source}, root={DescribeElement(root)}, content={DescribeElement(element)}");
+        }
         LogAutomationDebug($"Map stash page content dynamically resolved via {source}. content={DescribeElement(element)}, mapDescendants={CountVisibleMapEntityDescendants(element)}, children={DescribeChildren(element)}");
         return true;
     }
