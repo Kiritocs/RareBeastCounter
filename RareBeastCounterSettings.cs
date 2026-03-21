@@ -260,6 +260,9 @@ public class StashAutomationSettings
     [Menu("Flat Extra Delay (ms)", "Additional fixed delay added on top of every automation delay and timeout.")]
     public RangeNode<int> FlatExtraDelayMs { get; set; } = new(0, 0, 500);
 
+    [Menu("Verbose Debug Logging", "Write detailed stash automation diagnostics for tab switching, map stash tier/page selection, and fragment scarab tab lookup.")]
+    public ToggleNode DebugLogging { get; set; } = new(false);
+
     [Menu("Advanced Timing", "Advanced click, polling, and timeout timing values used by stash automation.")]
     public StashAutomationTimingSettings Timing { get; set; } = new();
 

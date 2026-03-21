@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Threading;
 using System.Threading.Tasks;
+using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory.Elements.InventoryElements;
 using ExileCore.PoEMemory.MemoryObjects;
@@ -581,19 +582,7 @@ public partial class RareBeastCounter
 
     private void DrawBestiaryPanelPrices()
     {
-        var ui = GameController.IngameState.IngameUi;
-        var bestiaryRoot = ui.GetChildAtIndex(50)
-            ?.GetChildAtIndex(2)?.GetChildAtIndex(0)
-            ?.GetChildAtIndex(1)?.GetChildAtIndex(1)
-            ?.GetChildAtIndex(11);
-
-        if (bestiaryRoot == null || !bestiaryRoot.IsVisible) return;
-
-        var capturedPanel = bestiaryRoot.GetChildAtIndex(0)?.GetChildAtIndex(18);
-        if (capturedPanel == null || !capturedPanel.IsVisible) return;
-
-        var beastsDisplay = capturedPanel.GetChildAtIndex(1)?.GetChildAtIndex(0);
-        if (beastsDisplay == null) return;
+        if (!TryGetBestiaryCapturedBeastsDisplay(out var beastsDisplay, out var visibleRect)) return;
 
         foreach (var beastContainer in beastsDisplay.Children)
         {
@@ -611,13 +600,15 @@ public partial class RareBeastCounter
                     if (!_beastPrices.TryGetValue(nameText, out var price) || price < 0) continue;
 
                     var rect = beastEl.GetClientRect();
+                    if (!IsRectMostlyInside(rect, visibleRect)) continue;
+
                     var center = new Vector2(rect.Center.X, rect.Center.Y);
 
-                    Graphics.DrawBox(rect, new Color(0, 0, 0, 128));
-                    Graphics.DrawFrame(rect, Color.White, 1);
+                    Graphics.DrawBox(rect, new Color(0, 0, 0, 0.5f));
+                    Graphics.DrawFrame(rect, Color.White, 2);
                     Graphics.DrawText(nameText, center, Color.White, FontAlign.Center);
                     Graphics.DrawText($"{price.ToString(CultureInfo.InvariantCulture)}c",
-                        center + new Vector2(0, 18), Color.Yellow, FontAlign.Center);
+                        center + new Vector2(0, 20), Color.White, FontAlign.Center);
                 }
                 catch
                 {
@@ -625,6 +616,46 @@ public partial class RareBeastCounter
                 }
             }
         }
+    }
+
+    private bool TryGetBestiaryCapturedBeastsDisplay(out Element beastsDisplay, out RectangleF visibleRect)
+    {
+        beastsDisplay = null!;
+        visibleRect = default;
+
+        var bestiaryPanel = GameController.IngameState.IngameUi.GetChildAtIndex(50)
+            ?.GetChildAtIndex(2)?.GetChildAtIndex(0)
+            ?.GetChildAtIndex(1)?.GetChildAtIndex(1)
+            ?.GetChildAtIndex(15);
+        if (bestiaryPanel == null || !bestiaryPanel.IsVisible) return false;
+
+        var capturedPanel = bestiaryPanel.GetChildAtIndex(0)?.GetChildAtIndex(18);
+        if (capturedPanel == null || !capturedPanel.IsVisible) return false;
+
+        var viewport = capturedPanel.GetChildAtIndex(1);
+        if (viewport == null || !viewport.IsVisible) return false;
+
+        visibleRect = viewport.GetClientRect();
+        beastsDisplay = viewport.GetChildAtIndex(0);
+        return beastsDisplay != null;
+    }
+
+    private static bool IsRectMostlyInside(RectangleF rect, RectangleF bounds)
+    {
+        var overlapLeft = Math.Max(rect.Left, bounds.Left);
+        var overlapTop = Math.Max(rect.Top, bounds.Top);
+        var overlapRight = Math.Min(rect.Right, bounds.Right);
+        var overlapBottom = Math.Min(rect.Bottom, bounds.Bottom);
+
+        var overlapWidth = overlapRight - overlapLeft;
+        var overlapHeight = overlapBottom - overlapTop;
+        if (overlapWidth <= 0 || overlapHeight <= 0) return false;
+
+        var rectArea = rect.Width * rect.Height;
+        if (rectArea <= 0) return false;
+
+        var visibleAreaRatio = overlapWidth * overlapHeight / rectArea;
+        return visibleAreaRatio >= 0.6f;
     }
 
     private void DrawFilledCircleInWorld(Vector3 position, float radius, Color color)

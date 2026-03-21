@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using ExileCore;
@@ -80,12 +81,15 @@ public partial class RareBeastCounter
             return;
         }
 
+        LogAutomationDebug($"Run started. {DescribeStash(stash)}");
+
         _isAutomationRunning = true;
         _isAutomationStopRequested = false;
         ResetAutomationState();
         try
         {
             var automationTargets = GetAutomationTargets(automation);
+            LogAutomationDebug($"Configured targets: {string.Join(" | ", automationTargets.Select(x => $"{x.Label} [{DescribeTarget(x.Target)}]"))}");
             UpdateAutomationStatus("Restocking inventory...");
 
             var totalTransferred = 0;
@@ -147,14 +151,17 @@ public partial class RareBeastCounter
     {
         var automation = Settings.StashAutomation;
         var requestedQuantity = target.Quantity.Value;
+        LogAutomationDebug($"Restock target '{label}' starting. {DescribeTarget(target)}");
         if (!target.Enabled.Value || requestedQuantity <= 0)
         {
+            LogAutomationDebug($"Restock target '{label}' skipped. enabled={target.Enabled.Value}, requestedQuantity={requestedQuantity}");
             return 0;
         }
 
         UpdateAutomationStatus($"Loading {label}...");
 
         var tabIndex = ResolveConfiguredTabIndex(target);
+        LogAutomationDebug($"Target '{label}' resolved stash tab index {tabIndex} for tab '{target.SelectedTabName.Value}'.");
         await PrepareConfiguredTargetAsync(automation, target, tabIndex);
 
         var useMapStashPageItems = IsMapStashTarget(target);
@@ -170,6 +177,7 @@ public partial class RareBeastCounter
             configuredItemName,
             visibleItems,
             useMapStashPageItems);
+        LogAutomationDebug($"Target '{label}' source resolved. useMapStashPageItems={useMapStashPageItems}, configuredName='{configuredItemName}', metadata='{sourceMetadata}', available={availableInStash}, visibleItems={visibleItems.Count}");
 
         if (string.IsNullOrWhiteSpace(sourceMetadata))
         {
@@ -188,17 +196,20 @@ public partial class RareBeastCounter
 
         for (var retryAttempt = 0; retryAttempt < 3 && transferred < transferGoal; retryAttempt++)
         {
+            LogAutomationDebug($"Target '{label}' transfer attempt {retryAttempt + 1}/3. transferred={transferred}, goal={transferGoal}");
             var movedThisAttempt = false;
             while (transferred < transferGoal)
             {
                 var movedAmount = await TryTransferNextMatchingItemAsync(target, sourceMetadata, useMapStashPageItems);
                 if (movedAmount <= 0)
                 {
+                    LogAutomationDebug($"Target '{label}' found no transferable item on attempt {retryAttempt + 1}. transferred={transferred}, goal={transferGoal}");
                     break;
                 }
 
                 movedThisAttempt = true;
                 transferred += movedAmount;
+                LogAutomationDebug($"Target '{label}' transferred {movedAmount}. totalTransferred={transferred}, requested={requestedQuantity}");
                 UpdateAutomationStatus($"Loading {label}: {Math.Min(transferred, requestedQuantity)}/{requestedQuantity} (available {availableInStash})");
                 await DelayAutomationAsync(automation.ClickDelayMs.Value);
             }
@@ -214,6 +225,7 @@ public partial class RareBeastCounter
 
             if (!movedThisAttempt)
             {
+                LogAutomationDebug($"Target '{label}' retrying special stash sub-tab selection. remainingAvailable={remainingAvailable}");
                 await EnsureSpecialStashSubTabSelectedAsync(target);
                 await DelayAutomationAsync(automation.TabSwitchDelayMs.Value);
             }
@@ -271,8 +283,11 @@ public partial class RareBeastCounter
 
     private async Task PrepareConfiguredTargetAsync(StashAutomationSettings automation, StashAutomationTargetSettings target, int tabIndex)
     {
+        LogAutomationDebug($"Preparing target. {DescribeTarget(target)}, requestedTabIndex={tabIndex}");
         await SelectStashTabAsync(tabIndex);
+        LogAutomationDebug($"After SelectStashTabAsync: {DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
         await EnsureSpecialStashSubTabSelectedAsync(target);
+        LogAutomationDebug($"After EnsureSpecialStashSubTabSelectedAsync: {DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
         await DelayAutomationAsync(automation.TabSwitchDelayMs.Value);
         await EnsureMapStashPageSelectedAsync(target, 1);
         await EnsureMapStashPageWithItemSelectedAsync(target);
@@ -499,6 +514,7 @@ public partial class RareBeastCounter
         var configuredMapTier = TryGetConfiguredMapTier(target);
         if (stash?.IsVisible != true || stash.VisibleStash?.InvType != InventoryType.MapStash || !configuredMapTier.HasValue)
         {
+            LogAutomationDebug($"EnsureMapStashTierTabSelectedAsync skipped. {DescribeStash(stash)}, configuredTier={(configuredMapTier.HasValue ? configuredMapTier.Value : -1)}, item='{target.ItemName.Value}'");
             _lastAutomationMapStashTierSelection = -1;
             return;
         }
@@ -506,9 +522,13 @@ public partial class RareBeastCounter
         var mapTier = configuredMapTier.Value;
         var childIndex = mapTier <= 9 ? mapTier - 1 : mapTier - 10;
         var tierPath = mapTier <= 9 ? MapStashTierOneToNineTabPath : MapStashTierTenToSixteenTabPath;
-        var tierTab = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(tierPath)?.Children.ElementAtOrDefault(childIndex);
+        LogAutomationDebug($"Map stash tier path trace: {DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, tierPath)}");
+        var tierContainer = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(tierPath);
+        var tierTab = tierContainer?.Children.ElementAtOrDefault(childIndex);
         if (tierTab == null)
         {
+            LogAutomationDebug($"Map stash tier tab not found. tier={mapTier}, childIndex={childIndex}, path={DescribePath(tierPath)}, container={DescribeElement(tierContainer)}");
+            LogAutomationDebug($"Map stash tier container children: {DescribeChildren(tierContainer)}");
             _lastAutomationMapStashTierSelection = -1;
             return;
         }
@@ -516,16 +536,19 @@ public partial class RareBeastCounter
         var selectionKey = stash.IndexVisibleStash * 100 + mapTier;
         if (_lastAutomationMapStashTierSelection == selectionKey)
         {
+            LogAutomationDebug($"Map stash tier tab {mapTier} already selected for stash index {stash.IndexVisibleStash}. selectionKey={selectionKey}");
             return;
         }
 
         var tierRect = tierTab.GetClientRect();
+        LogAutomationDebug($"Clicking map stash tier tab. tier={mapTier}, selectionKey={selectionKey}, path={DescribePath(tierPath)}, tab={DescribeElement(tierTab)}");
         await ClickAtAsync(
             tierRect.Center,
             holdCtrl: false,
             preClickDelayMs: timing.UiClickPreDelayMs.Value,
             postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs.Value, automation.TabSwitchDelayMs.Value));
         _lastAutomationMapStashTierSelection = selectionKey;
+        LogAutomationDebug($"Map stash tier tab click complete. rememberedSelectionKey={_lastAutomationMapStashTierSelection}");
     }
 
     private async Task<bool> EnsureMapStashPageWithItemSelectedAsync(StashAutomationTargetSettings target, string metadata = null)
@@ -533,36 +556,43 @@ public partial class RareBeastCounter
         var automation = Settings.StashAutomation;
         if (!IsMapStashTarget(target))
         {
+            LogAutomationDebug($"EnsureMapStashPageWithItemSelectedAsync skipped because target is not a map stash target. {DescribeTarget(target)}");
             return false;
         }
 
         var itemName = target.ItemName.Value?.Trim();
         if (MapStashVisiblePageContainsMatch(itemName, metadata))
         {
+            LogAutomationDebug($"Visible map stash page already contains requested match. item='{itemName}', metadata='{metadata}', currentPage={_lastAutomationMapStashPageNumber}");
             return true;
         }
 
         var pageTabsByNumber = GetMapStashPageTabsByNumber();
         if (pageTabsByNumber == null || pageTabsByNumber.Count == 0)
         {
+            LogAutomationDebug($"No map stash page tabs found while looking for item='{itemName}', metadata='{metadata}'.");
             return false;
         }
 
         var orderedPageNumbers = GetMapStashSearchPageNumbers(pageTabsByNumber);
+        LogAutomationDebug($"Searching map stash pages for item='{itemName}', metadata='{metadata}'. Pages={string.Join(", ", orderedPageNumbers)}, tabs={DescribePageTabs(pageTabsByNumber)}");
 
         foreach (var pageNumber in orderedPageNumbers)
         {
             if (!await EnsureMapStashPageSelectedAsync(target, pageNumber))
             {
+                LogAutomationDebug($"Failed to select map stash page {pageNumber} while searching for item='{itemName}', metadata='{metadata}'.");
                 continue;
             }
 
             if (MapStashVisiblePageContainsMatch(itemName, metadata))
             {
+                LogAutomationDebug($"Found requested map stash item on page {pageNumber}. item='{itemName}', metadata='{metadata}'");
                 return true;
             }
         }
 
+        LogAutomationDebug($"Requested map stash item was not found on searchable pages. item='{itemName}', metadata='{metadata}'");
         return false;
     }
 
@@ -571,22 +601,27 @@ public partial class RareBeastCounter
         var automation = Settings.StashAutomation;
         if (!IsMapStashTarget(target))
         {
+            LogAutomationDebug($"EnsureMapStashPageSelectedAsync skipped because target is not a map stash target. pageNumber={pageNumber}, {DescribeTarget(target)}");
             return false;
         }
 
+        LogAutomationDebug($"Map stash page tabs path trace: {DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageTabPath)}");
         var pageTabsByNumber = GetMapStashPageTabsByNumber();
         if (pageTabsByNumber == null || pageTabsByNumber.Count == 0)
         {
+            LogAutomationDebug($"EnsureMapStashPageSelectedAsync found no page tabs. requestedPage={pageNumber}");
             return false;
         }
 
         if (!pageTabsByNumber.TryGetValue(pageNumber, out var pageTab))
         {
+            LogAutomationDebug($"Requested map stash page {pageNumber} was not found. Available pages: {string.Join(", ", pageTabsByNumber.Keys.OrderBy(x => x))}");
             return false;
         }
 
         var sourceIndex = GetMapStashPageSourceIndex(pageTab);
         _lastAutomationMapStashPageNumber = pageNumber;
+        LogAutomationDebug($"Selecting map stash page {pageNumber}. sourceIndex={sourceIndex}, tab={DescribeElement(pageTab)}");
 
         await SelectMapStashPageAsync(pageTab, sourceIndex, pageNumber, automation);
         return true;
@@ -599,6 +634,7 @@ public partial class RareBeastCounter
         var timing = automation.Timing;
         var rect = pageTab.GetClientRect();
         var center = rect.Center;
+        LogAutomationDebug($"Clicking map stash page {pageNumber}. sourceIndex={sourceIndex}, rect={DescribeRect(rect)}");
 
         await ClickAtAsync(
             center,
@@ -610,11 +646,15 @@ public partial class RareBeastCounter
 
     private IList<Element> GetMapStashPageTabs()
     {
-        var pageTabs = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(MapStashPageTabPath)?.Children;
+        var pageTabContainer = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(MapStashPageTabPath);
+        var pageTabs = pageTabContainer?.Children;
         if (pageTabs == null)
         {
+            LogAutomationDebug($"GetMapStashPageTabs could not resolve page tab container. pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageTabPath)}");
             return null;
         }
+
+        LogAutomationDebug($"GetMapStashPageTabs resolved {pageTabs.Count} page tab children. container={DescribeElement(pageTabContainer)}, children={DescribeChildren(pageTabContainer)}");
 
         return pageTabs;
     }
@@ -679,13 +719,25 @@ public partial class RareBeastCounter
 
     private IList<Element> GetVisibleMapStashPageItems()
     {
-        return GameController?.IngameState?.IngameUi?.OpenLeftPanel?
-            .GetChildFromIndices(MapStashPageContentPath)?
-            .Children?
-            .FirstOrDefault(child => child?.IsVisible == true)?
-            .Children?
+        var pageContent = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(MapStashPageContentPath);
+        if (pageContent == null)
+        {
+            LogAutomationDebug($"GetVisibleMapStashPageItems could not resolve page content. pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageContentPath)}");
+            return null;
+        }
+
+        var visibleChild = pageContent.Children?.FirstOrDefault(child => child?.IsVisible == true);
+        if (visibleChild == null)
+        {
+            LogAutomationDebug($"GetVisibleMapStashPageItems found no visible child in page content. content={DescribeElement(pageContent)}, children={DescribeChildren(pageContent)}");
+            return null;
+        }
+
+        var items = visibleChild.Children?
             .Where(child => child?.Entity != null)
             .ToList();
+        LogAutomationDebug($"GetVisibleMapStashPageItems resolved visibleChild={DescribeElement(visibleChild)}, itemCount={items?.Count ?? 0}");
+        return items;
     }
 
     private async Task<Element> WaitForNextMatchingMapStashPageItemAsync(string metadata)
@@ -710,11 +762,14 @@ public partial class RareBeastCounter
             var nextPageItem = FindNextMatchingMapStashPageItem(visiblePageItems, metadata);
             if (nextPageItem?.Entity != null)
             {
+                LogAutomationDebug($"WaitForNextMatchingMapStashPageItemAsync found metadata='{metadata}'. item={DescribeElement(nextPageItem)}");
                 return nextPageItem;
             }
 
             await DelayAutomationAsync(timing.FastPollDelayMs.Value);
         }
+
+        LogAutomationDebug($"WaitForNextMatchingMapStashPageItemAsync timed out for metadata='{metadata}'. pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageContentPath)}");
 
         return null;
     }
@@ -982,7 +1037,10 @@ public partial class RareBeastCounter
     {
         var stash = GameController?.IngameState?.IngameUi?.StashElement;
         if (stash?.IsVisible != true)
+        {
+            LogAutomationDebug("ResolveConfiguredTabIndex aborted because stash is not visible.");
             return -1;
+        }
 
         var stashTabNames = GetAvailableStashTabNames(stash);
         var configuredTabName = target.SelectedTabName.Value?.Trim();
@@ -997,6 +1055,13 @@ public partial class RareBeastCounter
 
                 return i;
             }
+
+            LogAutomationDebug($"Configured tab '{configuredTabName}' was not found. Available tabs: {string.Join(", ", stashTabNames.Select((name, index) => $"{index}:{name}"))}");
+        }
+
+        if (string.IsNullOrWhiteSpace(configuredTabName))
+        {
+            LogAutomationDebug($"No configured stash tab name for target '{target.ItemName.Value}'. Available tabs: {string.Join(", ", stashTabNames.Select((name, index) => $"{index}:{name}"))}");
         }
 
         return -1;
@@ -1027,13 +1092,17 @@ public partial class RareBeastCounter
 
         if (tabIndex < 0 || tabIndex >= stash.TotalStashes)
         {
+            LogAutomationDebug($"SelectStashTabAsync received invalid tab index {tabIndex}. {DescribeStash(stash)}");
             throw new InvalidOperationException("Select a valid stash tab name before running restock.");
         }
 
         if (stash.IndexVisibleStash == tabIndex)
         {
+            LogAutomationDebug($"SelectStashTabAsync skipping because stash tab {tabIndex} is already visible.");
             return;
         }
+
+        LogAutomationDebug($"Selecting stash tab {tabIndex}. Starting state: {DescribeStash(stash)}");
 
         var maxSteps = Math.Max(3, (int)stash.TotalStashes * 2);
         for (var step = 0; step < maxSteps; step++)
@@ -1048,21 +1117,25 @@ public partial class RareBeastCounter
             var currentIndex = stash.IndexVisibleStash;
             if (currentIndex == tabIndex)
             {
+                LogAutomationDebug($"SelectStashTabAsync reached target tab {tabIndex} after {step} steps.");
                 return;
             }
 
             var key = tabIndex < currentIndex ? Keys.Left : Keys.Right;
+            LogAutomationDebug($"SelectStashTabAsync step {step + 1}/{maxSteps}. currentIndex={currentIndex}, targetIndex={tabIndex}, key={key}");
             Input.KeyDown(key);
             await DelayAutomationAsync(timing.KeyTapDelayMs.Value);
             Input.KeyUp(key);
 
             var changedIndex = await WaitForVisibleTabIndexChangeAsync(currentIndex, Math.Max(timing.TabChangeTimeoutMs.Value, automation.TabSwitchDelayMs.Value));
+            LogAutomationDebug($"SelectStashTabAsync step {step + 1} result. previousIndex={currentIndex}, changedIndex={changedIndex}");
             if (changedIndex == currentIndex)
             {
                 await DelayAutomationAsync(Math.Max(timing.TabRetryDelayMs.Value, automation.TabSwitchDelayMs.Value / 2));
             }
         }
 
+        LogAutomationDebug($"SelectStashTabAsync exhausted step loop for targetIndex={tabIndex}. Waiting for visible tab. {DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
         await WaitForVisibleTabAsync(tabIndex);
     }
 
@@ -1073,23 +1146,30 @@ public partial class RareBeastCounter
         var stash = GameController?.IngameState?.IngameUi?.StashElement;
         if (stash?.IsVisible != true || stash.VisibleStash?.InvType != InventoryType.FragmentStash)
         {
+            LogAutomationDebug($"EnsureFragmentStashScarabTabSelectedAsync skipped. {DescribeStash(stash)}");
             _lastAutomationFragmentScarabTabIndex = -1;
             return;
         }
 
         if (stash.IndexVisibleStash == _lastAutomationFragmentScarabTabIndex)
         {
+            LogAutomationDebug($"EnsureFragmentStashScarabTabSelectedAsync skipping because stash tab {stash.IndexVisibleStash} already selected scarab tab previously.");
             return;
         }
 
+        LogAutomationDebug($"Ensuring fragment scarab tab using path {DescribePath(FragmentStashScarabTabPath)}. {DescribeStash(stash)}");
+        LogAutomationDebug($"Fragment stash path trace: {DescribePathLookup(stash, FragmentStashScarabTabPath)}");
         var startedAt = DateTime.UtcNow;
         var timeoutMs = GetAutomationTimeoutMs(Math.Max(timing.FragmentTabBaseTimeoutMs.Value, automation.TabSwitchDelayMs.Value + timing.FragmentTabBaseTimeoutMs.Value));
+        var attempts = 0;
         while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
         {
+            attempts++;
             ThrowIfAutomationStopRequested();
             stash = GameController?.IngameState?.IngameUi?.StashElement;
             if (stash?.IsVisible != true || stash.VisibleStash?.InvType != InventoryType.FragmentStash)
             {
+                LogAutomationDebug($"EnsureFragmentStashScarabTabSelectedAsync aborted during polling. {DescribeStash(stash)}");
                 _lastAutomationFragmentScarabTabIndex = -1;
                 return;
             }
@@ -1097,17 +1177,27 @@ public partial class RareBeastCounter
             var scarabTab = stash.GetChildFromIndices(FragmentStashScarabTabPath);
             if (scarabTab != null)
             {
+                LogAutomationDebug($"Fragment scarab tab found on attempt {attempts}. {DescribeElement(scarabTab)}");
                 await ClickAtAsync(
                     scarabTab.GetClientRect().Center,
                     holdCtrl: false,
                     preClickDelayMs: timing.UiClickPreDelayMs.Value,
                     postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs.Value, automation.TabSwitchDelayMs.Value));
                 _lastAutomationFragmentScarabTabIndex = stash.IndexVisibleStash;
+                LogAutomationDebug($"Fragment scarab tab clicked. rememberedStashIndex={_lastAutomationFragmentScarabTabIndex}");
                 return;
+            }
+
+            if (attempts == 1 || attempts % 5 == 0)
+            {
+                LogAutomationDebug($"Fragment scarab tab not found on attempt {attempts}. path={DescribePath(FragmentStashScarabTabPath)}, stash={DescribeStash(stash)}");
+                LogAutomationDebug($"Fragment scarab path trace attempt {attempts}: {DescribePathLookup(stash, FragmentStashScarabTabPath)}");
             }
 
             await DelayAutomationAsync(timing.FastPollDelayMs.Value);
         }
+
+        LogAutomationDebug($"EnsureFragmentStashScarabTabSelectedAsync timed out after {attempts} attempts. path={DescribePath(FragmentStashScarabTabPath)}, stash={DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
     }
 
     private async Task WaitForVisibleTabAsync(int tabIndex)
@@ -1127,6 +1217,7 @@ public partial class RareBeastCounter
             await DelayAutomationAsync(timing.FastPollDelayMs.Value);
         }
 
+        LogAutomationDebug($"WaitForVisibleTabAsync timed out. targetTab={tabIndex}, stash={DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
         throw new InvalidOperationException($"Timed out switching to stash tab {tabIndex}.");
     }
 
@@ -1150,6 +1241,7 @@ public partial class RareBeastCounter
             await DelayAutomationAsync(timing.FastPollDelayMs.Value);
         }
 
+        LogAutomationDebug($"WaitForVisibleTabIndexChangeAsync timed out. previousTabIndex={previousTabIndex}, timeoutMs={timeoutMs}, stash={DescribeStash(GameController?.IngameState?.IngameUi?.StashElement)}");
         return previousTabIndex;
     }
 
@@ -1252,6 +1344,129 @@ public partial class RareBeastCounter
         }
 
         _lastAutomationStatusMessage = message;
+        LogAutomationDebug($"STATUS: {message}");
+    }
+
+    private void LogAutomationDebug(string message)
+    {
+        if (Settings?.StashAutomation?.DebugLogging?.Value != true)
+        {
+            return;
+        }
+
+        try
+        {
+            DebugWindow.LogMsg($"[RareBeastCounter.Automation] {message}");
+        }
+        catch
+        {
+        }
+    }
+
+    private static string DescribeTarget(StashAutomationTargetSettings target)
+    {
+        if (target == null)
+        {
+            return "target=null";
+        }
+
+        return $"enabled={target.Enabled.Value}, item='{target.ItemName.Value}', quantity={target.Quantity.Value}, selectedTab='{target.SelectedTabName.Value}'";
+    }
+
+    private static string DescribeStash(StashElement stash)
+    {
+        if (stash == null)
+        {
+            return "stash=null";
+        }
+
+        return $"stashVisible={stash.IsVisible}, visibleTabIndex={stash.IndexVisibleStash}, totalTabs={stash.TotalStashes}, visibleType={stash.VisibleStash?.InvType.ToString() ?? "null"}";
+    }
+
+    private static string DescribeElement(Element element)
+    {
+        if (element == null)
+        {
+            return "element=null";
+        }
+
+        var rect = element.GetClientRect();
+        return $"visible={element.IsVisible}, children={element.Children?.Count ?? 0}, rect={DescribeRect(rect)}";
+    }
+
+    private static string DescribeRect(RectangleF rect)
+    {
+        return $"[{rect.Left:0.#},{rect.Top:0.#}] -> [{rect.Right:0.#},{rect.Bottom:0.#}]";
+    }
+
+    private static string DescribePath(IReadOnlyList<int> path)
+    {
+        return path == null ? "null" : string.Join("->", path);
+    }
+
+    private static string DescribePageTabs(IReadOnlyDictionary<int, Element> pageTabsByNumber)
+    {
+        if (pageTabsByNumber == null || pageTabsByNumber.Count == 0)
+        {
+            return "none";
+        }
+
+        return string.Join(" | ", pageTabsByNumber.OrderBy(x => x.Key).Select(x => $"{x.Key}:{DescribeElement(x.Value)}"));
+    }
+
+    private static string DescribeChildren(Element parent, int maxChildren = 12)
+    {
+        if (parent?.Children == null)
+        {
+            return "children=null";
+        }
+
+        return string.Join(" | ", parent.Children.Take(maxChildren).Select((child, index) => $"{index}:{DescribeElement(child)}"));
+    }
+
+    private static string DescribePathLookup(Element root, IReadOnlyList<int> path)
+    {
+        if (root == null)
+        {
+            return $"root=null, path={DescribePath(path)}";
+        }
+
+        if (path == null || path.Count == 0)
+        {
+            return $"path empty, root={DescribeElement(root)}";
+        }
+
+        var builder = new StringBuilder();
+        var current = root;
+        builder.Append($"root={DescribeElement(root)}");
+
+        for (var i = 0; i < path.Count; i++)
+        {
+            var childIndex = path[i];
+            var children = current?.Children;
+            builder.Append($" -> [{childIndex}] children={children?.Count ?? 0}");
+
+            if (children == null || childIndex < 0 || childIndex >= children.Count)
+            {
+                builder.Append(" (missing)");
+                if (current != null)
+                {
+                    builder.Append($", siblings={DescribeChildren(current)}");
+                }
+
+                return builder.ToString();
+            }
+
+            current = children[childIndex];
+            builder.Append($" => {DescribeElement(current)}");
+        }
+
+        if (current != null)
+        {
+            builder.Append($", finalChildren={DescribeChildren(current)}");
+        }
+
+        return builder.ToString();
     }
 
 }
