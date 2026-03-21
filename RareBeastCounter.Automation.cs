@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -12,6 +13,7 @@ using ExileCore.PoEMemory.Elements.InventoryElements;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
 using ImGuiNET;
+using Newtonsoft.Json;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
 
@@ -19,18 +21,24 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter
 {
+    private const string SettingsFileName = "RareBeastCounter_settings.json";
     private static readonly int[] FragmentStashScarabTabPath = [2, 0, 0, 1, 1, 1, 0, 5, 0, 1];
-    private static readonly int[] MapStashTierOneToNineTabPath = [2, 0, 0, 1, 1, 3, 0, 0];
-    private static readonly int[] MapStashTierTenToSixteenTabPath = [2, 0, 0, 1, 1, 3, 0, 1];
-    private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 3, 0, 3, 0];
+    private static readonly int[] MapStashTierOneToNineTabPath = [99];
+    private static readonly int[] MapStashTierTenToSixteenTabPath = [99];
+    private static readonly int[] MapStashPageTabPath = [99];
     private static readonly int[] MapStashPageNumberPath = [0, 1];
-    private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
+    private static readonly int[] MapStashPageContentPath = [99];
     private string _lastAutomationStatusMessage;
     private bool _isAutomationRunning;
     private bool _isAutomationStopRequested;
     private int _lastAutomationFragmentScarabTabIndex = -1;
     private int _lastAutomationMapStashTierSelection = -1;
     private int _lastAutomationMapStashPageNumber = -1;
+    private int _lastAutomationMapStashUiCacheKey = -1;
+    private Element _lastAutomationMapStashTierGroupRoot;
+    private Element _lastAutomationMapStashPageTabContainer;
+    private Dictionary<int, Element> _lastAutomationMapStashPageTabsByNumber;
+    private Element _lastAutomationMapStashPageContentRoot;
 
     private void DrawTargetTabSelectorPanel(string label, string idSuffix, StashAutomationTargetSettings target)
     {
@@ -177,6 +185,7 @@ public partial class RareBeastCounter
             configuredItemName,
             visibleItems,
             useMapStashPageItems);
+
         LogAutomationDebug($"Target '{label}' source resolved. useMapStashPageItems={useMapStashPageItems}, configuredName='{configuredItemName}', metadata='{sourceMetadata}', available={availableInStash}, visibleItems={visibleItems.Count}");
 
         if (string.IsNullOrWhiteSpace(sourceMetadata))
@@ -520,15 +529,10 @@ public partial class RareBeastCounter
         }
 
         var mapTier = configuredMapTier.Value;
-        var childIndex = mapTier <= 9 ? mapTier - 1 : mapTier - 10;
-        var tierPath = mapTier <= 9 ? MapStashTierOneToNineTabPath : MapStashTierTenToSixteenTabPath;
-        LogAutomationDebug($"Map stash tier path trace: {DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, tierPath)}");
-        var tierContainer = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(tierPath);
-        var tierTab = tierContainer?.Children.ElementAtOrDefault(childIndex);
+        var tierTab = TryResolveMapStashTierTab(mapTier);
         if (tierTab == null)
         {
-            LogAutomationDebug($"Map stash tier tab not found. tier={mapTier}, childIndex={childIndex}, path={DescribePath(tierPath)}, container={DescribeElement(tierContainer)}");
-            LogAutomationDebug($"Map stash tier container children: {DescribeChildren(tierContainer)}");
+            LogAutomationDebug($"Map stash tier tab not found. tier={mapTier}, openLeftPanel={DescribeElement(GameController?.IngameState?.IngameUi?.OpenLeftPanel)}");
             _lastAutomationMapStashTierSelection = -1;
             return;
         }
@@ -541,7 +545,7 @@ public partial class RareBeastCounter
         }
 
         var tierRect = tierTab.GetClientRect();
-        LogAutomationDebug($"Clicking map stash tier tab. tier={mapTier}, selectionKey={selectionKey}, path={DescribePath(tierPath)}, tab={DescribeElement(tierTab)}");
+        LogAutomationDebug($"Clicking map stash tier tab. tier={mapTier}, selectionKey={selectionKey}, tab={DescribeElement(tierTab)}");
         await ClickAtAsync(
             tierRect.Center,
             holdCtrl: false,
@@ -575,7 +579,8 @@ public partial class RareBeastCounter
         }
 
         var orderedPageNumbers = GetMapStashSearchPageNumbers(pageTabsByNumber);
-        LogAutomationDebug($"Searching map stash pages for item='{itemName}', metadata='{metadata}'. Pages={string.Join(", ", orderedPageNumbers)}, tabs={DescribePageTabs(pageTabsByNumber)}");
+        var describedPages = orderedPageNumbers.Count > 0 ? string.Join(", ", orderedPageNumbers) : "<none>";
+        LogAutomationDebug($"Searching map stash pages for item='{itemName}', metadata='{metadata}'. Pages={describedPages}, tabs={DescribePageTabs(pageTabsByNumber)}");
 
         foreach (var pageNumber in orderedPageNumbers)
         {
@@ -646,7 +651,7 @@ public partial class RareBeastCounter
 
     private IList<Element> GetMapStashPageTabs()
     {
-        var pageTabContainer = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(MapStashPageTabPath);
+        var pageTabContainer = ResolveMapStashPageTabContainer();
         var pageTabs = pageTabContainer?.Children;
         if (pageTabs == null)
         {
@@ -661,9 +666,16 @@ public partial class RareBeastCounter
 
     private Dictionary<int, Element> GetMapStashPageTabsByNumber()
     {
-        var pageTabs = GetMapStashPageTabs();
+        var pageTabContainer = ResolveMapStashPageTabContainer();
+        if (pageTabContainer != null && ReferenceEquals(pageTabContainer, _lastAutomationMapStashPageTabContainer) && _lastAutomationMapStashPageTabsByNumber?.Count > 0)
+        {
+            return _lastAutomationMapStashPageTabsByNumber;
+        }
+
+        var pageTabs = pageTabContainer?.Children;
         if (pageTabs == null)
         {
+            _lastAutomationMapStashPageTabsByNumber = null;
             return null;
         }
 
@@ -677,7 +689,9 @@ public partial class RareBeastCounter
             }
         }
 
-        return pageTabsByNumber;
+        _lastAutomationMapStashPageTabContainer = pageTabContainer;
+        _lastAutomationMapStashPageTabsByNumber = pageTabsByNumber;
+        return _lastAutomationMapStashPageTabsByNumber;
     }
 
     private IReadOnlyList<int> GetMapStashSearchPageNumbers(IReadOnlyDictionary<int, Element> pageTabsByNumber)
@@ -741,25 +755,641 @@ public partial class RareBeastCounter
         return current;
     }
 
-    private IList<Element> GetVisibleMapStashPageItems()
+    private static Element TryGetElementByPathQuietly(Element root, IReadOnlyList<int> path)
     {
-        var pageContent = GameController?.IngameState?.IngameUi?.OpenLeftPanel?.GetChildFromIndices(MapStashPageContentPath);
-        if (pageContent == null)
+        return TryGetChildFromIndicesQuietly(root, path);
+    }
+
+    private Element TryResolveMapStashTierTab(int mapTier)
+    {
+        var childIndex = mapTier <= 9 ? mapTier - 1 : mapTier - 10;
+        var tierPath = mapTier <= 9 ? MapStashTierOneToNineTabPath : MapStashTierTenToSixteenTabPath;
+        var openLeftPanel = GameController?.IngameState?.IngameUi?.OpenLeftPanel;
+        InvalidateCachedMapStashUiStateIfNeeded();
+        LogAutomationDebug($"Map stash tier path trace: {DescribePathLookup(openLeftPanel, tierPath)}");
+
+        var tierContainer = TryGetElementByPathQuietly(openLeftPanel, tierPath);
+        var tierTab = tierContainer?.Children.ElementAtOrDefault(childIndex);
+        if (tierTab != null)
         {
-            LogAutomationDebug($"GetVisibleMapStashPageItems could not resolve page content. pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageContentPath)}");
+            return tierTab;
+        }
+
+        LogAutomationDebug($"Map stash tier fixed path failed. tier={mapTier}, childIndex={childIndex}, path={DescribePath(tierPath)}, container={DescribeElement(tierContainer)}, children={DescribeChildren(tierContainer)}");
+
+        var dynamicTierGroup = ResolveMapStashTierGroupRoot(openLeftPanel);
+        var dynamicTierContainer = dynamicTierGroup?.Children.ElementAtOrDefault(mapTier <= 9 ? 0 : 1);
+        var dynamicTierTabFromGroup = dynamicTierContainer?.Children.ElementAtOrDefault(childIndex);
+        if (dynamicTierTabFromGroup != null)
+        {
+            LogAutomationDebug($"Map stash tier dynamically resolved from tier group. tier={mapTier}, group={DescribeElement(dynamicTierGroup)}, container={DescribeElement(dynamicTierContainer)}, tab={DescribeElement(dynamicTierTabFromGroup)}");
+            return dynamicTierTabFromGroup;
+        }
+
+        var tierText = mapTier.ToString();
+        var dynamicTierTab = EnumerateDescendants(openLeftPanel)
+            .Where(element => element?.IsVisible == true)
+            .FirstOrDefault(element => string.Equals(GetElementTextRecursive(element), tierText, StringComparison.OrdinalIgnoreCase));
+
+        if (dynamicTierTab != null)
+        {
+            LogAutomationDebug($"Map stash tier dynamically resolved. tier={mapTier}, tab={DescribeElement(dynamicTierTab)}");
+        }
+
+        return dynamicTierTab;
+    }
+
+    private Element ResolveMapStashPageTabContainer()
+    {
+        var openLeftPanel = GameController?.IngameState?.IngameUi?.OpenLeftPanel;
+        InvalidateCachedMapStashUiStateIfNeeded();
+        var pageTabContainer = TryGetElementByPathQuietly(openLeftPanel, MapStashPageTabPath);
+        if (CountValidMapStashPageTabs(pageTabContainer) >= 6)
+        {
+            _lastAutomationMapStashPageTabContainer = pageTabContainer;
+            TryPersistMapStashElementPath(
+                openLeftPanel,
+                pageTabContainer,
+                hints => hints.MapStashPageTabContainerPath,
+                (hints, path) => hints.MapStashPageTabContainerPath = path,
+                "map stash page tab container");
+            return pageTabContainer;
+        }
+
+        if (CountValidMapStashPageTabs(_lastAutomationMapStashPageTabContainer) >= 6)
+        {
+            return _lastAutomationMapStashPageTabContainer;
+        }
+
+        var persistedContainer = TryResolvePersistedMapStashElementPath(
+            openLeftPanel,
+            GetAutomationDynamicHints()?.MapStashPageTabContainerPath,
+            element => CountValidMapStashPageTabs(element) >= 6,
+            "map stash page tab container");
+        if (persistedContainer != null)
+        {
+            _lastAutomationMapStashPageTabContainer = persistedContainer;
+            return persistedContainer;
+        }
+
+        Element dynamicContainer = null;
+        var bestPageCount = 0;
+        var bestArea = float.MinValue;
+        foreach (var element in EnumerateDescendants(openLeftPanel))
+        {
+            var pageCount = CountValidMapStashPageTabs(element);
+            if (pageCount < 6)
+            {
+                continue;
+            }
+
+            var area = GetRectangleArea(element.GetClientRect());
+            if (dynamicContainer == null || pageCount > bestPageCount || pageCount == bestPageCount && area > bestArea)
+            {
+                dynamicContainer = element;
+                bestPageCount = pageCount;
+                bestArea = area;
+            }
+        }
+
+        _lastAutomationMapStashPageTabContainer = dynamicContainer ?? pageTabContainer;
+        TryPersistMapStashElementPath(
+            openLeftPanel,
+            _lastAutomationMapStashPageTabContainer,
+            hints => hints.MapStashPageTabContainerPath,
+            (hints, path) => hints.MapStashPageTabContainerPath = path,
+            "map stash page tab container");
+
+        return _lastAutomationMapStashPageTabContainer;
+    }
+
+    private Element ResolveMapStashPageContentRoot()
+    {
+        var openLeftPanel = GameController?.IngameState?.IngameUi?.OpenLeftPanel;
+        InvalidateCachedMapStashUiStateIfNeeded();
+        var pageContent = TryGetElementByPathQuietly(openLeftPanel, MapStashPageContentPath);
+        if (TryRememberMapStashPageContentRoot(pageContent, "fixed path"))
+        {
+            return pageContent;
+        }
+
+        if (IsReusableMapStashPageContentRoot(_lastAutomationMapStashPageContentRoot))
+        {
+            LogAutomationDebug($"Reusing cached map stash page content root. content={DescribeElement(_lastAutomationMapStashPageContentRoot)}");
+            return _lastAutomationMapStashPageContentRoot;
+        }
+
+        var persistedContentRoot = TryResolvePersistedMapStashElementPath(
+            openLeftPanel,
+            GetAutomationDynamicHints()?.MapStashPageContentRootPath,
+            IsReusableMapStashPageContentRoot,
+            "map stash page content root");
+        if (persistedContentRoot != null)
+        {
+            _lastAutomationMapStashPageContentRoot = persistedContentRoot;
+            return persistedContentRoot;
+        }
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            openLeftPanel = GameController?.IngameState?.IngameUi?.OpenLeftPanel;
+            Element dynamicContent = null;
+            var bestMapDescendants = 0;
+            var bestArea = float.MaxValue;
+            foreach (var element in EnumerateDescendants(openLeftPanel))
+            {
+                if (!TryGetMapStashPageContentCandidateScore(element, out var mapDescendants, out var area))
+                {
+                    continue;
+                }
+
+                if (dynamicContent == null || mapDescendants > bestMapDescendants || mapDescendants == bestMapDescendants && area < bestArea)
+                {
+                    dynamicContent = element;
+                    bestMapDescendants = mapDescendants;
+                    bestArea = area;
+                }
+            }
+
+            if (TryRememberMapStashPageContentRoot(dynamicContent, $"dynamic attempt {attempt + 1}"))
+            {
+                return dynamicContent;
+            }
+
+            if (attempt < 2)
+            {
+                System.Threading.Thread.Sleep(15);
+            }
+        }
+
+        return IsReusableMapStashPageContentRoot(_lastAutomationMapStashPageContentRoot)
+            ? _lastAutomationMapStashPageContentRoot
+            : null;
+    }
+
+    private void InvalidateCachedMapStashUiStateIfNeeded()
+    {
+        var stash = GameController?.IngameState?.IngameUi?.StashElement;
+        var currentCacheKey = stash?.IsVisible == true && stash.VisibleStash?.InvType == InventoryType.MapStash
+            ? stash.IndexVisibleStash
+            : -1;
+
+        if (_lastAutomationMapStashUiCacheKey == currentCacheKey)
+        {
+            return;
+        }
+
+        _lastAutomationMapStashUiCacheKey = currentCacheKey;
+        _lastAutomationMapStashTierGroupRoot = null;
+        _lastAutomationMapStashPageTabContainer = null;
+        _lastAutomationMapStashPageTabsByNumber = null;
+        _lastAutomationMapStashPageContentRoot = null;
+    }
+
+    private Element ResolveMapStashTierGroupRoot(Element openLeftPanel)
+    {
+        if (IsMapStashTierGroupContainer(_lastAutomationMapStashTierGroupRoot))
+        {
+            return _lastAutomationMapStashTierGroupRoot;
+        }
+
+        var persistedTierGroup = TryResolvePersistedMapStashElementPath(
+            openLeftPanel,
+            GetAutomationDynamicHints()?.MapStashTierGroupPath,
+            IsMapStashTierGroupContainer,
+            "map stash tier group");
+        if (persistedTierGroup != null)
+        {
+            _lastAutomationMapStashTierGroupRoot = persistedTierGroup;
+            return persistedTierGroup;
+        }
+
+        Element bestTierGroup = null;
+        var bestArea = float.MinValue;
+        foreach (var element in EnumerateDescendants(openLeftPanel))
+        {
+            if (!IsMapStashTierGroupContainer(element))
+            {
+                continue;
+            }
+
+            var area = GetRectangleArea(element.GetClientRect());
+            if (bestTierGroup == null || area > bestArea)
+            {
+                bestTierGroup = element;
+                bestArea = area;
+            }
+        }
+
+        _lastAutomationMapStashTierGroupRoot = bestTierGroup;
+        TryPersistMapStashElementPath(
+            openLeftPanel,
+            _lastAutomationMapStashTierGroupRoot,
+            hints => hints.MapStashTierGroupPath,
+            (hints, path) => hints.MapStashTierGroupPath = path,
+            "map stash tier group");
+        return _lastAutomationMapStashTierGroupRoot;
+    }
+
+    private StashAutomationDynamicHintSettings GetAutomationDynamicHints()
+    {
+        return Settings?.StashAutomation?.DynamicHints;
+    }
+
+    private Element TryResolvePersistedMapStashElementPath(
+        Element root,
+        IReadOnlyList<int> path,
+        Func<Element, bool> validator,
+        string label)
+    {
+        if (root == null || path == null || path.Count <= 0 || validator == null)
+        {
             return null;
         }
 
-        var items = new List<Element>();
-        CollectVisibleEntityDescendants(pageContent, items);
-        if (items.Count <= 0)
+        var resolvedElement = TryGetElementByPathQuietly(root, path);
+        if (!validator(resolvedElement))
         {
+            return null;
+        }
+
+        LogAutomationDebug($"Resolved {label} from persisted path {DescribePath(path)}. element={DescribeElement(resolvedElement)}");
+        return resolvedElement;
+    }
+
+    private void TryPersistMapStashElementPath(
+        Element root,
+        Element target,
+        Func<StashAutomationDynamicHintSettings, List<int>> getter,
+        Action<StashAutomationDynamicHintSettings, List<int>> setter,
+        string label)
+    {
+        var hints = GetAutomationDynamicHints();
+        if (root == null || target == null || hints == null || getter == null || setter == null)
+        {
+            return;
+        }
+
+        var resolvedPath = TryFindPathFromRoot(root, target);
+        if (resolvedPath == null || resolvedPath.Count <= 0)
+        {
+            return;
+        }
+
+        var existingPath = getter(hints);
+        if (existingPath != null && existingPath.SequenceEqual(resolvedPath))
+        {
+            LogAutomationDebug($"Persisted {label} path unchanged ({DescribePath(resolvedPath)}); skipping settings snapshot save.");
+            return;
+        }
+
+        setter(hints, resolvedPath);
+        LogAutomationDebug($"Persisted {label} path {DescribePath(resolvedPath)}");
+        TrySaveSettingsSnapshot();
+    }
+
+    private void TrySaveSettingsSnapshot()
+    {
+        try
+        {
+            var settings = Settings;
+            if (settings == null)
+            {
+                return;
+            }
+
+            var configDirectory = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config", "global");
+            Directory.CreateDirectory(configDirectory);
+            var settingsPath = Path.Combine(configDirectory, SettingsFileName);
+            var settingsJson = JsonConvert.SerializeObject(settings, Formatting.Indented);
+            File.WriteAllText(settingsPath, settingsJson);
+            LogAutomationDebug($"Saved settings snapshot to '{settingsPath}'.");
+        }
+        catch (Exception ex)
+        {
+            LogAutomationDebug($"Failed to save settings snapshot: {ex.Message}");
+        }
+    }
+
+    private static List<int> TryFindPathFromRoot(Element root, Element target)
+    {
+        if (root == null || target == null)
+        {
+            return null;
+        }
+
+        if (ReferenceEquals(root, target))
+        {
+            return [];
+        }
+
+        var stack = new Stack<(Element Element, List<int> Path)>();
+        stack.Push((root, []));
+
+        while (stack.Count > 0)
+        {
+            var (current, path) = stack.Pop();
+            var children = current?.Children;
+            if (children == null)
+            {
+                continue;
+            }
+
+            for (var i = children.Count - 1; i >= 0; i--)
+            {
+                var child = children[i];
+                if (child == null)
+                {
+                    continue;
+                }
+
+                var childPath = new List<int>(path.Count + 1);
+                childPath.AddRange(path);
+                childPath.Add(i);
+                if (ReferenceEquals(child, target))
+                {
+                    return childPath;
+                }
+
+                stack.Push((child, childPath));
+            }
+        }
+
+        return null;
+    }
+
+    private Element FindFragmentScarabTabDynamically(Element root)
+    {
+        return EnumerateDescendants(root)
+            .Where(element => element?.IsVisible == true)
+            .FirstOrDefault(element => GetElementTextRecursive(element)?.IndexOf("Scarab", StringComparison.OrdinalIgnoreCase) >= 0);
+    }
+
+    private static int CountValidMapStashPageTabs(Element element)
+    {
+        var children = element?.Children;
+        if (children == null)
+        {
+            return 0;
+        }
+
+        var pageNumbers = new HashSet<int>();
+        foreach (var child in children)
+        {
+            var pageNumber = GetMapStashPageNumber(child);
+            if (pageNumber.HasValue)
+            {
+                pageNumbers.Add(pageNumber.Value);
+            }
+        }
+
+        return pageNumbers.Count;
+    }
+
+    private static bool IsMapStashTierGroupContainer(Element element)
+    {
+        var children = element?.Children;
+        if (children == null || children.Count < 2)
+        {
+            return false;
+        }
+
+        return IsMapStashTierContainer(children[0]) && IsMapStashTierContainer(children[1]);
+    }
+
+    private static bool IsMapStashTierContainer(Element element)
+    {
+        var children = element?.Children;
+        if (children == null || children.Count < 7)
+        {
+            return false;
+        }
+
+        var visibleChildren = children.Count(child => child?.IsVisible == true);
+        return visibleChildren >= 7;
+    }
+
+    private static bool IsMapStashPageContentCandidate(Element element)
+    {
+        return TryGetMapStashPageContentCandidateScore(element, out _, out _);
+    }
+
+    private static bool TryGetMapStashPageContentCandidateScore(Element element, out int mapDescendants, out float area)
+    {
+        mapDescendants = 0;
+        area = 0;
+        if (element?.IsVisible != true || (element.Children?.Count ?? 0) <= 0)
+        {
+            return false;
+        }
+
+        mapDescendants = CountVisibleMapEntityDescendants(element);
+        if (mapDescendants <= 0 || mapDescendants > 96)
+        {
+            return false;
+        }
+
+        if (CountValidMapStashPageTabs(element) >= 6 || IsMapStashTierGroupContainer(element))
+        {
+            return false;
+        }
+
+        foreach (var descendant in EnumerateDescendants(element))
+        {
+            if (CountValidMapStashPageTabs(descendant) >= 6 || IsMapStashTierGroupContainer(descendant))
+            {
+                return false;
+            }
+        }
+
+        area = GetRectangleArea(element.GetClientRect());
+        return true;
+    }
+
+    private static bool IsReusableMapStashPageContentRoot(Element element)
+    {
+        if (element?.IsVisible != true)
+        {
+            return false;
+        }
+
+        var childCount = element.Children?.Count ?? 0;
+        if (childCount <= 0 || childCount > 32)
+        {
+            return false;
+        }
+
+        return CountValidMapStashPageTabs(element) < 6 && !IsMapStashTierGroupContainer(element);
+    }
+
+    private bool TryRememberMapStashPageContentRoot(Element element, string source)
+    {
+        if (!IsMapStashPageContentCandidate(element))
+        {
+            return false;
+        }
+
+        _lastAutomationMapStashPageContentRoot = element;
+        TryPersistMapStashElementPath(
+            GameController?.IngameState?.IngameUi?.OpenLeftPanel,
+            element,
+            hints => hints.MapStashPageContentRootPath,
+            (hints, path) => hints.MapStashPageContentRootPath = path,
+            "map stash page content root");
+        LogAutomationDebug($"Map stash page content dynamically resolved via {source}. content={DescribeElement(element)}, mapDescendants={CountVisibleMapEntityDescendants(element)}, children={DescribeChildren(element)}");
+        return true;
+    }
+
+    private static int CountVisibleMapEntityDescendants(Element root)
+    {
+        if (root == null)
+        {
+            return 0;
+        }
+
+        var count = 0;
+        foreach (var element in EnumerateDescendants(root, includeSelf: true))
+        {
+            if (element?.IsVisible == true && element.Entity?.Metadata?.IndexOf("Metadata/Items/Maps", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    private static string GetElementTextRecursive(Element element, int maxDepth = 3)
+    {
+        if (element == null)
+        {
+            return null;
+        }
+
+        var directText = TryGetElementText(element);
+        if (!string.IsNullOrWhiteSpace(directText))
+        {
+            return directText;
+        }
+
+        if (maxDepth <= 0 || element.Children == null)
+        {
+            return null;
+        }
+
+        foreach (var child in element.Children)
+        {
+            var text = GetElementTextRecursive(child, maxDepth - 1);
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        return null;
+    }
+
+    private static string TryGetElementText(Element element)
+    {
+        try
+        {
+            return element?.GetText(16)?.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<Element> EnumerateDescendants(Element root, bool includeSelf = false)
+    {
+        if (root == null)
+        {
+            yield break;
+        }
+
+        if (includeSelf)
+        {
+            yield return root;
+        }
+
+        var children = root.Children;
+        if (children == null)
+        {
+            yield break;
+        }
+
+        var stack = new Stack<Element>();
+        for (var i = children.Count - 1; i >= 0; i--)
+        {
+            if (children[i] != null)
+            {
+                stack.Push(children[i]);
+            }
+        }
+
+        while (stack.Count > 0)
+        {
+            var current = stack.Pop();
+            yield return current;
+
+            var currentChildren = current.Children;
+            if (currentChildren == null)
+            {
+                continue;
+            }
+
+            for (var i = currentChildren.Count - 1; i >= 0; i--)
+            {
+                if (currentChildren[i] != null)
+                {
+                    stack.Push(currentChildren[i]);
+                }
+            }
+        }
+    }
+
+    private static float GetRectangleArea(RectangleF rect)
+    {
+        return Math.Max(0, rect.Width) * Math.Max(0, rect.Height);
+    }
+
+    private IList<Element> GetVisibleMapStashPageItems()
+    {
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var pageContent = ResolveMapStashPageContentRoot();
+            if (pageContent == null)
+            {
+                if (attempt < 2)
+                {
+                    System.Threading.Thread.Sleep(15);
+                    continue;
+                }
+
+                LogAutomationDebug($"GetVisibleMapStashPageItems could not resolve page content. pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.OpenLeftPanel, MapStashPageContentPath)}");
+                return null;
+            }
+
+            var items = new List<Element>();
+            CollectVisibleEntityDescendants(pageContent, items);
+            if (items.Count > 0)
+            {
+                LogAutomationDebug($"GetVisibleMapStashPageItems resolved content={DescribeElement(pageContent)}, itemCount={items.Count}");
+                return items;
+            }
+
+            if (attempt < 2)
+            {
+                System.Threading.Thread.Sleep(15);
+                continue;
+            }
+
             LogAutomationDebug($"GetVisibleMapStashPageItems found no visible entity descendants in page content. content={DescribeElement(pageContent)}, children={DescribeChildren(pageContent)}");
             return null;
         }
 
-        LogAutomationDebug($"GetVisibleMapStashPageItems resolved content={DescribeElement(pageContent)}, itemCount={items.Count}");
-        return items;
+        return null;
     }
 
     private static void CollectVisibleEntityDescendants(Element root, ICollection<Element> results)
@@ -1230,7 +1860,7 @@ public partial class RareBeastCounter
                 return;
             }
 
-            var scarabTab = stash.GetChildFromIndices(FragmentStashScarabTabPath);
+            var scarabTab = TryGetElementByPathQuietly(stash, FragmentStashScarabTabPath) ?? FindFragmentScarabTabDynamically(stash);
             if (scarabTab != null)
             {
                 LogAutomationDebug($"Fragment scarab tab found on attempt {attempts}. {DescribeElement(scarabTab)}");

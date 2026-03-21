@@ -283,6 +283,49 @@ public class StashAutomationSettings
 
     [Menu("Target 6", "Source settings for the sixth customizable restock target.")]
     public StashAutomationTargetSettings Target6 { get; set; } = new() { Enabled = new(false), Quantity = new RangeNode<int>(0, 0, 200) };
+
+    [JsonIgnore]
+    internal StashAutomationDynamicHintSettings DynamicHints { get; set; } = new();
+
+    [JsonProperty("DynamicHints")]
+    private StashAutomationDynamicHintSettings SavedDynamicHints
+    {
+        get => DynamicHints;
+        set => DynamicHints = value ?? new StashAutomationDynamicHintSettings();
+    }
+}
+
+public class StashAutomationDynamicHintSettings
+{
+    [JsonIgnore]
+    internal List<int> MapStashTierGroupPath { get; set; } = [];
+
+    [JsonIgnore]
+    internal List<int> MapStashPageTabContainerPath { get; set; } = [];
+
+    [JsonIgnore]
+    internal List<int> MapStashPageContentRootPath { get; set; } = [];
+
+    [JsonProperty("MapStashTierGroupPath")]
+    private List<int> SavedMapStashTierGroupPath
+    {
+        get => MapStashTierGroupPath;
+        set => MapStashTierGroupPath = value ?? [];
+    }
+
+    [JsonProperty("MapStashPageTabContainerPath")]
+    private List<int> SavedMapStashPageTabContainerPath
+    {
+        get => MapStashPageTabContainerPath;
+        set => MapStashPageTabContainerPath = value ?? [];
+    }
+
+    [JsonProperty("MapStashPageContentRootPath")]
+    private List<int> SavedMapStashPageContentRootPath
+    {
+        get => MapStashPageContentRootPath;
+        set => MapStashPageContentRootPath = value ?? [];
+    }
 }
 
 [Submenu(CollapsedByDefault = true)]
