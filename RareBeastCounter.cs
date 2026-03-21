@@ -10,6 +10,7 @@ using ExileCore.PoEMemory.Components;
 using ExileCore.PoEMemory;
 using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
+using ExileCore.Shared.Nodes;
 using ImGuiNET;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
@@ -23,87 +24,10 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private const string MissingTrackedBeastName = "\0";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
-    private static readonly TrackedBeast[] AllRedBeasts =
-    [
-        // Craicic (The Deep)
-        new("Craicic Chimeral",      ["GemFrogBestiary"],           "cic c"),
-        new("Craicic Spider Crab",   ["CrabSpiderBestiary"],        "c sp"),
-        new("Craicic Maw",           ["FrogBestiary"],              "cic m"),
-        new("Craicic Sand Spitter",  ["SandSpitterBestiary"],       "c san"),
-        new("Craicic Savage Crab",   ["CrabParasiteLargeBestiary"], "c sav"),
-        new("Craicic Shield Crab",   ["ShieldCrabBestiary"],        "c sh"),
-        new("Craicic Squid",         ["SeaWitchSpawnBestiary"],     "sq"),
-        new("Craicic Vassal",        ["ParasiticSquidBestiary"],    "c v"),
-        new("Craicic Watcher",       ["SquidBestiary"],             "c wa"),
 
-        // Farric (The Wilds) — Chieftain must precede Ape so "BestiaryMonkey" substring matches correctly
-        new("Farric Tiger Alpha",         ["TigerBestiary"],             "c ti"),
-        new("Farric Wolf Alpha",          ["WolfBestiary"],              "f a"),
-        new("Farric Lynx Alpha",          ["LynxBestiary"],              "c l"),
-        new("Farric Flame Hellion Alpha", ["HellionBestiary"],           "c fl"),
-        new("Farric Magma Hound",         ["HoundBestiary"],             "ma h"),
-        new("Farric Pit Hound",           ["PitbullBestiary"],           "c pi"),
-        new("Farric Chieftain",           ["BestiaryMonkeyChiefBlood"], "rric c"),
-        new("Farric Ape",                 ["BestiaryMonkey", "MonkeyBloodBestiary"], "c a"),
-        new("Farric Goliath",             ["BestiarySpiker"],            "c gol"),
-        new("Farric Goatman",             ["GoatmanLeapSlamBestiary"],  "c goa"),
-        new("Farric Gargantuan",          ["BeastCaveBestiary"],        "c ga"),
-        new("Farric Taurus",              ["BestiaryBull"],             "ic ta"),
-        new("Farric Ursa",                ["DropBearBestiary"],         "c u"),
-        new("Vicious Hound",              ["PurgeHoundBestiary"],       "s ho"),
+    private static readonly string[] DefaultEnabledBeasts = RareBeastCounterBeastData.DefaultEnabledBeasts;
 
-        // Fenumal (The Caverns)
-        new("Fenumal Hybrid Arachnid",  ["SpiderPlatedBestiary"],   "l hy"),
-        new("Fenumal Plagued Arachnid", ["SpiderPlagueBestiary"],   "l pla"),
-        new("Fenumal Devourer",         ["RootSpiderBestiary"],     "mal d"),
-        new("Fenumal Queen",            ["InsectSpawnerBestiary"],  "l q"),
-        new("Fenumal Widow",            ["Spider5Bestiary"],        "l w"),
-        new("Fenumal Scorpion",         ["BlackScorpionBestiary"],  "l sco"),
-        new("Fenumal Scrabbler",        ["SandLeaperBestiary"],     "l scr"),
-
-        // Saqawine (The Sands)
-        new("Saqawine Rhex",        ["MarakethBirdBestiary"], "e rhe"),
-        new("Saqawine Vulture",     ["VultureBestiary"],      "e vu"),
-        new("Saqawine Cobra",       ["SnakeBestiary"],        "ne co"),
-        new("Saqawine Blood Viper", ["SnakeBestiary2"],       "ne b"),
-        new("Saqawine Retch",       ["KiwethBestiary"],       "ne re"),
-        new("Saqawine Rhoa",        ["RhoaBestiary"],         "ine rho"),
-        new("Saqawine Chimeral",    ["IguanaBestiary"],       "ne ch"),
-
-        // Spirit Bosses
-        new("Saqawal, First of the Sky",    ["MarakethBirdSpiritBoss"],         "al, f"),
-        new("Craiceann, First of the Deep", ["NessaCrabBestiarySpiritBoss"],    "n, f"),
-        new("Farrul, First of the Plains",  ["TigerBestiarySpiritBoss"],        "ul, f"),
-        new("Fenumus, First of the Night",  ["SpiderPlatedBestiarySpiritBoss"], "s, f"),
-
-        // Harvest T3 & special
-        new("Wild Bristle Matron",   ["HarvestBeastT3"],            "le m"),
-        new("Wild Hellion Alpha",    ["HarvestHellionT3"],          "ld h"),
-        new("Wild Brambleback",      ["HarvestBrambleHulkT3"],      "d bra"),
-        new("Primal Cystcaller",     ["HarvestGoatmanT3"],          "cy"),
-        new("Primal Rhex Matriarch", ["HarvestRhexT3"],             "x ma"),
-        new("Primal Crushclaw",      ["HarvestNessaCrabT3"],        "l cru"),
-        new("Vivid Vulture",         ["HarvestVultureParasiteT3"],  "id v"),
-        new("Vivid Watcher",         ["HarvestSquidT3"],            "id w"),
-        new("Vivid Abberarach",      ["HarvestPlatedScorpionT3"],   "d ab"),
-        new("Black Mórrigan",        ["GullGoliathBestiary", "Morrigan"], "k m"),
-    ];
-    private static readonly (string Pattern, string BeastName)[] TrackedBeastMetadataLookup =
-        AllRedBeasts.SelectMany(beast => beast.MetadataPatterns.Select(pattern => (pattern, beast.Name))).ToArray();
-
-    private static readonly string[] DefaultEnabledBeasts =
-    [
-        "Farrul, First of the Plains",
-        "Fenumus, First of the Night",
-        "Vivid Vulture",
-        "Wild Bristle Matron",
-        "Wild Hellion Alpha",
-        "Wild Brambleback",
-        "Craicic Chimeral",
-        "Fenumal Plagued Arachnid",
-        "Vicious Hound",
-        "Black Mórrigan",
-    ];
+    private static readonly TrackedBeast[] AllRedBeasts = RareBeastCounterBeastData.AllRedBeasts;
 
     private readonly HashSet<long> _countedRareBeastIds = new();
     private readonly Dictionary<long, Entity> _trackedBeastEntities = new();
@@ -113,8 +37,6 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private readonly StringBuilder _analyticsTextBuilder = new();
     private readonly Dictionary<string, int> _valuableBeastCounts = AllRedBeasts.ToDictionary(x => x.Name, _ => 0);
     private bool _analyticsCollapsed;
-    private bool _restockHotkeyWasDown;
-
     private int _rareBeastsFound;
     private int _sessionBeastsFound;
     private int _totalRedBeastsSession;
@@ -162,10 +84,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         beastPrices.BeastPickerPanel.DrawDelegate = DrawBeastPickerPanel;
 
         var stashAutomation = Settings.StashAutomation;
-        stashAutomation.RestockInventory.OnPressed = async () => await RunStashAutomationAsync();
-        stashAutomation.Target1.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target1, "Target 1"), "target1", stashAutomation.Target1);
-        stashAutomation.Target2.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target2, "Target 2"), "target2", stashAutomation.Target2);
-        stashAutomation.Target3.TabSelector.DrawDelegate = () => DrawTargetTabSelectorPanel(GetAutomationTargetLabel(stashAutomation.Target3, "Target 3"), "target3", stashAutomation.Target3);
+        InitializeAutomationSettingsUi(stashAutomation);
 
         EnsureDefaultEnabledBeasts();
         QueuePriceFetch();
@@ -297,16 +216,56 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             trackedBeasts = CollectTrackedBeastRenderInfo();
         }
 
-        if (mapRender.ShowBeastLabelsInWorld.Value && trackedBeasts.Count > 0) DrawInWorldBeasts(trackedBeasts);
-        if (ShouldDrawLargeMapOverlay(mapRender))
-            DrawBeastsOnLargeMap(trackedBeasts);
-        if (mapRender.ShowStylePreviewWindow.Value) DrawMapRenderStylePreviewWindow();
-        if (mapRender.ShowTrackedBeastsWindow.Value && trackedBeasts.Count > 0) DrawTrackedBeastsWindow(trackedBeasts);
-        if (mapRender.ShowPricesInInventory.Value) DrawInventoryBeasts();
-        if (mapRender.ShowPricesInStash.Value) DrawStashBeasts();
-        DrawMerchantBeasts();
-        if (mapRender.ShowPricesInBestiary.Value) DrawBestiaryPanelPrices();
+        RenderMapOverlays(mapRender, trackedBeasts);
+        RenderPriceOverlays(mapRender);
+        RenderAnalyticsOverlay(analyticsWindow);
+    }
 
+    private void RenderMapOverlays(MapRenderSettings mapRender, IReadOnlyList<TrackedBeastRenderInfo> trackedBeasts)
+    {
+        if (mapRender.ShowBeastLabelsInWorld.Value && trackedBeasts.Count > 0)
+        {
+            DrawInWorldBeasts(trackedBeasts);
+        }
+
+        if (ShouldDrawLargeMapOverlay(mapRender))
+        {
+            DrawBeastsOnLargeMap(trackedBeasts);
+        }
+
+        if (mapRender.ShowStylePreviewWindow.Value)
+        {
+            DrawMapRenderStylePreviewWindow();
+        }
+
+        if (mapRender.ShowTrackedBeastsWindow.Value && trackedBeasts.Count > 0)
+        {
+            DrawTrackedBeastsWindow(trackedBeasts);
+        }
+    }
+
+    private void RenderPriceOverlays(MapRenderSettings mapRender)
+    {
+        if (mapRender.ShowPricesInInventory.Value)
+        {
+            DrawInventoryBeasts();
+        }
+
+        if (mapRender.ShowPricesInStash.Value)
+        {
+            DrawStashBeasts();
+        }
+
+        DrawMerchantBeasts();
+
+        if (mapRender.ShowPricesInBestiary.Value)
+        {
+            DrawBestiaryPanelPrices();
+        }
+    }
+
+    private void RenderAnalyticsOverlay(AnalyticsWindowSettings analyticsWindow)
+    {
         GetOverlayVisibility(out var shouldRenderCounterAndMessage, out var shouldRenderAnalytics);
 
         if (!shouldRenderCounterAndMessage && !(shouldRenderAnalytics && analyticsWindow.Show.Value))
@@ -339,20 +298,16 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     private void HandleAutomationHotkey()
     {
-        var hotkey = Settings.StashAutomation.RestockHotkey.Value;
-        if (hotkey == Keys.None)
+        var hotkey = Settings.StashAutomation.RestockHotkey;
+        if (hotkey.Value == Keys.None)
         {
-            _restockHotkeyWasDown = false;
             return;
         }
 
-        var isDown = Input.IsKeyDown(hotkey);
-        if (isDown && !_restockHotkeyWasDown)
+        if (hotkey.PressedOnce())
         {
             _ = RunStashAutomationFromHotkeyAsync();
         }
-
-        _restockHotkeyWasDown = isDown;
     }
 
     private static bool ShouldCollectTrackedBeastRenderInfo(MapRenderSettings mapRender)
@@ -621,6 +576,4 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         return builder.ToString();
     }
-
-    private readonly record struct TrackedBeast(string Name, string[] MetadataPatterns, string RegexFragment = "");
 }

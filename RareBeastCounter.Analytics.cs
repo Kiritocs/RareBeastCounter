@@ -96,11 +96,16 @@ public partial class RareBeastCounter
             return false;
         }
 
-        foreach (var (pattern, trackedBeastName) in TrackedBeastMetadataLookup)
+        foreach (var beast in AllRedBeasts)
         {
-            if (metadata.IndexOf(pattern, StringComparison.OrdinalIgnoreCase) >= 0)
+            for (var i = 0; i < beast.MetadataPatterns.Length; i++)
             {
-                beastName = trackedBeastName;
+                if (metadata.IndexOf(beast.MetadataPatterns[i], StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    continue;
+                }
+
+                beastName = beast.Name;
                 return true;
             }
         }
@@ -171,12 +176,3 @@ public partial class RareBeastCounter
 
     }
 }
-
-
-
-
-
-
-
-
-

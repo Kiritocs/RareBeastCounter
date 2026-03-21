@@ -248,10 +248,7 @@ public class StashAutomationSettings
     [Menu("Enable", "Enable stash restock automation.")]
     public ToggleNode Enabled { get; set; } = new(false);
 
-    [Menu("Restock Inventory", "Switch to the configured stash tabs and ctrl-click matching stacks until the requested amounts are moved.")]
-    public ButtonNode RestockInventory { get; set; } = new();
-
-    [Menu("Restock Hotkey", "Hotkey that triggers the same restock action as the Restock Inventory button.")]
+    [Menu("Restock Hotkey", "Hotkey that triggers stash restock automation.")]
     public HotkeyNode RestockHotkey { get; set; } = new(Keys.None);
 
     [Menu("Click Delay (ms)", "Delay between ctrl-click transfers.")]
@@ -263,8 +260,8 @@ public class StashAutomationSettings
     [Menu("Flat Extra Delay (ms)", "Additional fixed delay added on top of every automation delay and timeout.")]
     public RangeNode<int> FlatExtraDelayMs { get; set; } = new(0, 0, 500);
 
-    [Menu("Debug Logging", "Write automation status updates to the log for troubleshooting.")]
-    public ToggleNode DebugLogging { get; set; } = new(false);
+    [Menu("Advanced Timing", "Advanced click, polling, and timeout timing values used by stash automation.")]
+    public StashAutomationTimingSettings Timing { get; set; } = new();
 
     [Menu("Target 1", "Source settings for the first customizable restock target.")]
     public StashAutomationTargetSettings Target1 { get; set; } = new() { ItemName = new TextNode("Map (Tier 16)"), Quantity = new RangeNode<int>(20, 0, 200) };
@@ -274,6 +271,62 @@ public class StashAutomationSettings
 
     [Menu("Target 3", "Source settings for the third customizable restock target.")]
     public StashAutomationTargetSettings Target3 { get; set; } = new() { ItemName = new TextNode("Bestiary Scarab of Duplicating"), Quantity = new RangeNode<int>(20, 0, 200) };
+
+    [Menu("Target 4", "Source settings for the fourth customizable restock target.")]
+    public StashAutomationTargetSettings Target4 { get; set; } = new() { Enabled = new(false), Quantity = new RangeNode<int>(0, 0, 200) };
+
+    [Menu("Target 5", "Source settings for the fifth customizable restock target.")]
+    public StashAutomationTargetSettings Target5 { get; set; } = new() { Enabled = new(false), Quantity = new RangeNode<int>(0, 0, 200) };
+
+    [Menu("Target 6", "Source settings for the sixth customizable restock target.")]
+    public StashAutomationTargetSettings Target6 { get; set; } = new() { Enabled = new(false), Quantity = new RangeNode<int>(0, 0, 200) };
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class StashAutomationTimingSettings
+{
+    [Menu("Key Tap Delay (ms)", "Delay between pressing and releasing left/right when switching stash tabs.")]
+    public RangeNode<int> KeyTapDelayMs { get; set; } = new(1, 0, 100);
+
+    [Menu("Ctrl-Click Pre Delay (ms)", "Delay after moving the cursor onto an item before ctrl-clicking it.")]
+    public RangeNode<int> CtrlClickPreDelayMs { get; set; } = new(5, 0, 250);
+
+    [Menu("Ctrl-Click Post Delay (ms)", "Delay after a ctrl-click transfer completes.")]
+    public RangeNode<int> CtrlClickPostDelayMs { get; set; } = new(5, 0, 250);
+
+    [Menu("UI Click Pre Delay (ms)", "Delay after moving the cursor onto stash UI buttons before clicking them.")]
+    public RangeNode<int> UiClickPreDelayMs { get; set; } = new(15, 0, 250);
+
+    [Menu("Min Tab Click Post Delay (ms)", "Minimum delay after clicking a stash subtab or page button.")]
+    public RangeNode<int> MinTabClickPostDelayMs { get; set; } = new(15, 0, 250);
+
+    [Menu("Fast Poll Delay (ms)", "Polling interval for quick stash refresh checks such as page, quantity, and tab changes.")]
+    public RangeNode<int> FastPollDelayMs { get; set; } = new(15, 0, 250);
+
+    [Menu("Stash Open Poll Delay (ms)", "Polling interval while waiting for the stash window to open.")]
+    public RangeNode<int> StashOpenPollDelayMs { get; set; } = new(30, 0, 500);
+
+    [Menu("Stash Interaction Distance", "Maximum player-to-stash grid distance considered close enough to attempt opening the stash.")]
+    public RangeNode<int> StashInteractionDistance { get; set; } = new(18, 1, 100);
+
+    [Menu("Tab Retry Delay (ms)", "Fallback delay before retrying when a stash tab switch did not register.")]
+    public RangeNode<int> TabRetryDelayMs { get; set; } = new(20, 0, 250);
+
+    [Menu("Tab Change Timeout Base (ms)", "Minimum timeout used while waiting for a stash tab index to change.")]
+    public RangeNode<int> TabChangeTimeoutMs { get; set; } = new(40, 0, 1000);
+
+    [Menu("Quantity Change Timeout Base (ms)", "Minimum timeout base used while waiting for transferred item quantities to update.")]
+    public RangeNode<int> QuantityChangeBaseDelayMs { get; set; } = new(100, 0, 1000);
+
+    [Menu("Open Stash Post Click Delay (ms)", "Delay after clicking the stash entity in the world.")]
+    public RangeNode<int> OpenStashPostClickDelayMs { get; set; } = new(250, 0, 1000);
+
+    [Menu("Fragment Tab Timeout Base (ms)", "Minimum timeout base used while waiting for fragment stash scarab controls.")]
+    public RangeNode<int> FragmentTabBaseTimeoutMs { get; set; } = new(50, 0, 2000);
+
+    [Menu("Visible Tab Timeout Base (ms)", "Base timeout used while waiting for the selected stash tab to become visible.")]
+    public RangeNode<int> VisibleTabTimeoutMs { get; set; } = new(50, 0, 5000);
+
 }
 
 [Submenu(CollapsedByDefault = true)]
