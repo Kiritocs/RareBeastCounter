@@ -251,6 +251,9 @@ public class StashAutomationSettings
     [Menu("Restock Hotkey", "Hotkey that triggers stash restock automation.")]
     public HotkeyNode RestockHotkey { get; set; } = new(Keys.None);
 
+    [Menu("Bestiary Clear Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, and ctrl-click releases beasts until none remain.")]
+    public HotkeyNode BestiaryClearHotkey { get; set; } = new(Keys.None);
+
     [Menu("Click Delay (ms)", "Delay between ctrl-click transfers.")]
     public RangeNode<int> ClickDelayMs { get; set; } = new(0, 0, 250);
 

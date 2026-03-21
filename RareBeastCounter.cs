@@ -298,14 +298,25 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
     private void HandleAutomationHotkey()
     {
-        var hotkey = Settings.StashAutomation.RestockHotkey;
-        if (hotkey.Value == Keys.None)
+        var automation = Settings.StashAutomation;
+
+        var bestiaryClearHotkey = automation.BestiaryClearHotkey;
+        if (bestiaryClearHotkey.Value != Keys.None && bestiaryClearHotkey.PressedOnce())
+        {
+            LogAutomationDebug($"Bestiary clear hotkey pressed. key={bestiaryClearHotkey.Value}");
+            _ = RunBestiaryClearAutomationFromHotkeyAsync();
+            return;
+        }
+
+        var restockHotkey = automation.RestockHotkey;
+        if (restockHotkey.Value == Keys.None)
         {
             return;
         }
 
-        if (hotkey.PressedOnce())
+        if (restockHotkey.PressedOnce())
         {
+            LogAutomationDebug($"Restock hotkey pressed. key={restockHotkey.Value}");
             _ = RunStashAutomationFromHotkeyAsync();
         }
     }

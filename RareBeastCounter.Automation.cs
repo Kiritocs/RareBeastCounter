@@ -21,20 +21,28 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter
 {
+    private const string MenagerieAreaName = "The Menagerie";
+    private const string MenagerieEinharMetadata = "Metadata/NPC/League/Bestiary/EinharMenagerie";
     private const string SettingsFileName = "RareBeastCounter_settings.json";
+    private static readonly int[] BestiaryCapturedBeastsButtonContainerPath = [50, 2, 0, 1, 1, 15, 0, 19];
     private static readonly int[] FragmentStashScarabTabPath = [2, 0, 0, 1, 1, 1, 0, 5, 0, 1];
     private static readonly int[] MapStashTierOneToNineTabPath = [2, 0, 0, 1, 1, 3, 0, 0];
     private static readonly int[] MapStashTierTenToSixteenTabPath = [2, 0, 0, 1, 1, 3, 0, 1];
     private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 3, 0, 3, 0];
     private static readonly int[] MapStashPageNumberPath = [0, 1];
     private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
+    private const int BestiaryReleaseTimeoutMs = 220;
+    private const int BestiaryUiSettleDelayMs = 20;
+    private const int BestiaryReleaseCooldownMs = 40;
     private string _lastAutomationStatusMessage;
     private bool _isAutomationRunning;
+    private bool _isBestiaryClearRunning;
     private bool _isAutomationStopRequested;
     private int _lastAutomationFragmentScarabTabIndex = -1;
     private int _lastAutomationMapStashTierSelection = -1;
     private int _lastAutomationMapStashPageNumber = -1;
     private int _lastAutomationMapStashUiCacheKey = -1;
+    private bool _hasBestiaryReleaseCursorAnchor;
     private Element _lastAutomationMapStashTierGroupRoot;
     private Element _lastAutomationMapStashPageTabContainer;
     private Dictionary<int, Element> _lastAutomationMapStashPageTabsByNumber;
@@ -147,6 +155,80 @@ public partial class RareBeastCounter
         }
 
         await RunStashAutomationAsync();
+    }
+
+    private async Task RunBestiaryClearAutomationFromHotkeyAsync()
+    {
+        if (_isAutomationRunning)
+        {
+            RequestAutomationStop();
+            return;
+        }
+
+        _isAutomationRunning = true;
+        _isBestiaryClearRunning = true;
+        _isAutomationStopRequested = false;
+        ResetAutomationState();
+
+        try
+        {
+            if (!IsInMenagerie())
+            {
+                await SendChatCommandAsync("/menagerie");
+                if (!await WaitForAreaNameAsync(MenagerieAreaName, 5000))
+                {
+                    throw new InvalidOperationException("Timed out travelling to The Menagerie.");
+                }
+            }
+
+            if (!IsBestiaryCapturedBeastsWindowOpen())
+            {
+                if (!IsBestiaryChallengePanelOpen())
+                {
+                    var einhar = await WaitForMenagerieEinharAsync();
+                    if (einhar == null)
+                    {
+                        throw new InvalidOperationException("Could not find Einhar in The Menagerie.");
+                    }
+
+                    await CtrlClickWorldEntityAsync(einhar);
+                    if (!await WaitForBestiaryCapturedBeastsButtonAsync())
+                    {
+                        throw new InvalidOperationException("Timed out opening the challenge panel.");
+                    }
+                }
+
+                var capturedBeastsButton = TryGetBestiaryCapturedBeastsButton();
+                if (capturedBeastsButton == null)
+                {
+                    throw new InvalidOperationException("Could not find the captured beasts button.");
+                }
+
+                await ClickBestiaryCapturedBeastsButtonAsync(capturedBeastsButton);
+                if (!await WaitForBestiaryCapturedBeastsDisplayAsync())
+                {
+                    throw new InvalidOperationException("Timed out opening the captured beasts window.");
+                }
+            }
+
+            await ClearCapturedBeastsAsync();
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch
+        {
+            throw;
+        }
+        finally
+        {
+            _isAutomationRunning = false;
+            _isBestiaryClearRunning = false;
+            _isAutomationStopRequested = false;
+            ResetAutomationState();
+            Input.KeyUp(Keys.ControlKey);
+            Input.KeyUp(Keys.LControlKey);
+        }
     }
 
     private async Task EnsureSpecialStashSubTabSelectedAsync(StashAutomationTargetSettings target)
@@ -263,6 +345,7 @@ public partial class RareBeastCounter
         _lastAutomationFragmentScarabTabIndex = -1;
         _lastAutomationMapStashTierSelection = -1;
         _lastAutomationMapStashPageNumber = -1;
+        _hasBestiaryReleaseCursorAnchor = false;
     }
 
     private void RequestAutomationStop()
@@ -273,7 +356,10 @@ public partial class RareBeastCounter
         }
 
         _isAutomationStopRequested = true;
-        UpdateAutomationStatus("Stopping restock...");
+        if (!_isBestiaryClearRunning)
+        {
+            UpdateAutomationStatus("Stopping restock...");
+        }
     }
 
     private void ThrowIfAutomationStopRequested()
@@ -2014,6 +2100,605 @@ public partial class RareBeastCounter
         }
 
         await DelayAutomationAsync(postClickDelayMs);
+    }
+
+    private async Task SendChatCommandAsync(string command)
+    {
+        ThrowIfAutomationStopRequested();
+
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            return;
+        }
+
+        ImGui.SetClipboardText(command);
+
+        var timing = Settings.StashAutomation.Timing;
+        await TapKeyAsync(Keys.Enter, timing.KeyTapDelayMs.Value, timing.FastPollDelayMs.Value);
+        await PasteClipboardAsync();
+        await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        await TapKeyAsync(Keys.Enter, timing.KeyTapDelayMs.Value, timing.FastPollDelayMs.Value);
+    }
+
+    private async Task PasteClipboardAsync()
+    {
+        var timing = Settings.StashAutomation.Timing;
+        Input.KeyDown(Keys.LControlKey);
+        await DelayAutomationAsync(timing.KeyTapDelayMs.Value);
+        Input.KeyDown(Keys.V);
+        await DelayAutomationAsync(timing.KeyTapDelayMs.Value);
+        Input.KeyUp(Keys.V);
+        Input.KeyUp(Keys.LControlKey);
+    }
+
+    private async Task TapKeyAsync(Keys key, int holdDelayMs, int postDelayMs)
+    {
+        Input.KeyDown(key);
+        await DelayAutomationAsync(holdDelayMs);
+        Input.KeyUp(key);
+        await DelayAutomationAsync(postDelayMs);
+    }
+
+    private async Task DelayForUiCheckAsync(int minimumDelayMs = 75)
+    {
+        var timing = Settings?.StashAutomation?.Timing;
+        var latencyDelayMs = GetServerLatencyMs();
+        var uiDelayMs = Math.Max(minimumDelayMs, latencyDelayMs > 0 ? Math.Min(250, latencyDelayMs) : 0);
+        if (timing != null)
+        {
+            uiDelayMs = Math.Max(uiDelayMs, timing.FastPollDelayMs.Value);
+        }
+
+        await DelayAutomationAsync(uiDelayMs);
+    }
+
+    private bool IsInMenagerie()
+    {
+        return string.Equals(GameController?.Area?.CurrentArea?.Name, MenagerieAreaName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool IsBestiaryChallengePanelOpen()
+    {
+        return TryGetBestiaryCapturedBeastsButton()?.IsVisible == true;
+    }
+
+    private bool IsBestiaryCapturedBeastsWindowOpen()
+    {
+        return TryGetBestiaryCapturedBeastsDisplay(out _, out _);
+    }
+
+    private async Task<bool> WaitForAreaNameAsync(string areaName, int timeoutMs)
+    {
+        var timing = Settings.StashAutomation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var adjustedTimeoutMs = GetAutomationTimeoutMs(timeoutMs);
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < adjustedTimeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+            if (string.Equals(GameController?.Area?.CurrentArea?.Name, areaName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        return string.Equals(GameController?.Area?.CurrentArea?.Name, areaName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task<Entity> WaitForMenagerieEinharAsync()
+    {
+        var timing = Settings.StashAutomation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var timeoutMs = GetAutomationTimeoutMs(5000);
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+            var einhar = FindMenagerieEinharEntity();
+            if (einhar != null)
+            {
+                return einhar;
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        return FindMenagerieEinharEntity();
+    }
+
+    private Entity FindMenagerieEinharEntity()
+    {
+        var entities = GameController?.EntityListWrapper?.Entities;
+        var camera = GameController?.Game?.IngameState?.Camera;
+        var window = GameController?.Window;
+        if (entities == null || camera == null || window == null)
+        {
+            return null;
+        }
+
+        var windowRect = window.GetWindowRectangle();
+        return entities
+            .Where(entity => entity?.IsValid == true && string.Equals(entity.Metadata, MenagerieEinharMetadata, StringComparison.OrdinalIgnoreCase))
+            .Select(entity => new
+            {
+                Entity = entity,
+                Render = entity.GetComponent<Render>(),
+                Distance = GetPlayerDistanceToEntity(entity) ?? float.MaxValue
+            })
+            .Where(x => x.Render != null)
+            .Where(x => IsScreenPositionVisible(camera.WorldToScreen(x.Render.PosNum), windowRect.Width, windowRect.Height))
+            .OrderBy(x => x.Distance)
+            .Select(x => x.Entity)
+            .FirstOrDefault();
+    }
+
+    private async Task CtrlClickWorldEntityAsync(Entity entity)
+    {
+        var render = entity?.GetComponent<Render>();
+        if (render == null)
+        {
+            throw new InvalidOperationException($"Could not find a clickable world position for {DescribeEntity(entity)}.");
+        }
+
+        var timing = Settings.StashAutomation.Timing;
+        var screenPosition = GameController.IngameState.Camera.WorldToScreen(render.PosNum);
+        await ClickAtAsync(
+            new SharpDX.Vector2(screenPosition.X, screenPosition.Y),
+            holdCtrl: true,
+            preClickDelayMs: timing.UiClickPreDelayMs.Value,
+            postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs.Value, Settings.StashAutomation.TabSwitchDelayMs.Value));
+    }
+
+    private Element TryGetBestiaryCapturedBeastsButton()
+    {
+        try
+        {
+            var buttonContainer = TryGetBestiaryCapturedBeastsButtonContainer();
+            if (buttonContainer?.Children == null)
+            {
+                return null;
+            }
+
+            foreach (var child in buttonContainer.Children)
+            {
+                if (child == null)
+                {
+                    continue;
+                }
+
+                var tooltipText = GetElementTextRecursive(child.Tooltip, 6);
+                if (tooltipText?.IndexOf("Captured Beasts", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return child;
+                }
+            }
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private Element TryGetBestiaryCapturedBeastsButtonContainer()
+    {
+        try
+        {
+            return GameController?.IngameState?.IngameUi
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[0])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[1])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[2])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[3])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[4])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[5])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[6])
+                ?.GetChildAtIndex(BestiaryCapturedBeastsButtonContainerPath[7]);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private async Task<bool> WaitForBestiaryCapturedBeastsButtonAsync()
+    {
+        var timing = Settings.StashAutomation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var timeoutMs = GetAutomationTimeoutMs(2000);
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+            if (TryGetBestiaryCapturedBeastsButton()?.IsVisible == true)
+            {
+                return true;
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        return TryGetBestiaryCapturedBeastsButton()?.IsVisible == true;
+    }
+
+    private async Task ClickBestiaryCapturedBeastsButtonAsync(Element button)
+    {
+        var timing = Settings.StashAutomation.Timing;
+        await ClickAtAsync(
+            button.GetClientRect().Center,
+            holdCtrl: false,
+            preClickDelayMs: timing.UiClickPreDelayMs.Value,
+            postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs.Value, Settings.StashAutomation.TabSwitchDelayMs.Value));
+    }
+
+    private async Task<bool> WaitForBestiaryCapturedBeastsDisplayAsync()
+    {
+        var timing = Settings.StashAutomation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var timeoutMs = GetAutomationTimeoutMs(2000);
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+            if (TryGetBestiaryCapturedBeastsDisplay(out _, out _))
+            {
+                return true;
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        return TryGetBestiaryCapturedBeastsDisplay(out _, out _);
+    }
+
+    private async Task ClearCapturedBeastsAsync()
+    {
+        var consecutiveFailures = 0;
+        Input.KeyDown(Keys.LControlKey);
+        try
+        {
+            while (true)
+            {
+                ThrowIfAutomationStopRequested();
+
+                var visibleBeasts = GetVisibleBestiaryCapturedBeasts();
+                if (visibleBeasts.Count <= 0)
+                {
+                    return;
+                }
+
+                var startingVisibleCount = visibleBeasts.Count;
+                var firstBeast = visibleBeasts[0];
+                var firstBeastIdentity = GetBestiaryBeastIdentity(firstBeast);
+                var visibleBeastSnapshot = GetBestiaryVisibleBeastSnapshot(visibleBeasts);
+                var previousInventorySnapshot = GetPlayerInventorySnapshot(GetVisiblePlayerInventoryItems());
+                await ClickBestiaryBeastWithHeldCtrlAsync(firstBeast);
+
+                var (bestiaryChanged, inventoryChanged, currentVisibleCount) = await WaitForBestiaryBeastListToChangeAsync(
+                    startingVisibleCount,
+                    firstBeastIdentity,
+                    visibleBeastSnapshot,
+                    previousInventorySnapshot,
+                    BestiaryReleaseTimeoutMs);
+                if (inventoryChanged && !bestiaryChanged)
+                {
+                    var (uiChangedAfterInventory, updatedVisibleCount) = await WaitForBestiaryUiChangeAfterInventoryChangeAsync(
+                        startingVisibleCount,
+                        firstBeastIdentity,
+                        visibleBeastSnapshot,
+                        BestiaryUiSettleDelayMs);
+                    bestiaryChanged = uiChangedAfterInventory;
+                    currentVisibleCount = updatedVisibleCount;
+                }
+
+                var releaseConfirmed = bestiaryChanged || inventoryChanged;
+
+                if (!releaseConfirmed)
+                {
+                    consecutiveFailures++;
+                    if (consecutiveFailures >= 12)
+                    {
+                        throw new InvalidOperationException("Bestiary clear stalled while releasing captured beasts.");
+                    }
+                }
+                else
+                {
+                    consecutiveFailures = 0;
+                }
+
+                if (releaseConfirmed)
+                {
+                    await DelayAutomationAsync(BestiaryReleaseCooldownMs);
+                }
+            }
+        }
+        finally
+        {
+            Input.KeyUp(Keys.LControlKey);
+        }
+    }
+
+    private async Task ClickBestiaryBeastWithHeldCtrlAsync(Element firstBeast)
+    {
+        var timing = Settings.StashAutomation.Timing;
+        if (!_hasBestiaryReleaseCursorAnchor)
+        {
+            if (firstBeast == null)
+            {
+                throw new InvalidOperationException("Could not resolve the initial Bestiary release click position.");
+            }
+
+            _hasBestiaryReleaseCursorAnchor = true;
+            await ClickAtAsync(
+                firstBeast.GetClientRect().Center,
+                holdCtrl: false,
+                preClickDelayMs: timing.CtrlClickPreDelayMs.Value,
+                postClickDelayMs: timing.CtrlClickPostDelayMs.Value);
+            return;
+        }
+
+        await PerformClickAsync(
+            holdCtrl: false,
+            preClickDelayMs: timing.CtrlClickPreDelayMs.Value,
+            postClickDelayMs: timing.CtrlClickPostDelayMs.Value);
+    }
+
+    private async Task PerformClickAsync(bool holdCtrl, int preClickDelayMs, int postClickDelayMs)
+    {
+        await DelayAutomationAsync(preClickDelayMs);
+
+        if (holdCtrl)
+        {
+            Input.KeyDown(Keys.LControlKey);
+        }
+
+        Input.Click(MouseButtons.Left);
+
+        if (holdCtrl)
+        {
+            Input.KeyUp(Keys.LControlKey);
+        }
+
+        await DelayAutomationAsync(postClickDelayMs);
+    }
+
+    private async Task<(bool BestiaryChanged, bool InventoryChanged, int CurrentCount)> WaitForBestiaryBeastListToChangeAsync(
+        int previousCount,
+        string previousFirstBeastIdentity,
+        string previousVisibleBeastSnapshot,
+        string previousInventorySnapshot,
+        int? timeoutOverrideMs = null)
+    {
+        if (previousCount <= 0)
+        {
+            return (false, false, 0);
+        }
+
+        var automation = Settings.StashAutomation;
+        var timing = automation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var timeoutMs = timeoutOverrideMs.HasValue && timeoutOverrideMs.Value > 0
+            ? timeoutOverrideMs.Value
+            : Math.Max(160, GetAutomationTimeoutMs(Math.Max(timing.QuantityChangeBaseDelayMs.Value, automation.ClickDelayMs.Value + timing.QuantityChangeBaseDelayMs.Value)));
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+
+            var currentVisibleBeasts = GetVisibleBestiaryCapturedBeasts();
+            var currentCount = currentVisibleBeasts.Count;
+            var currentInventorySnapshot = GetPlayerInventorySnapshot(GetVisiblePlayerInventoryItems());
+            var inventoryChanged = !string.Equals(currentInventorySnapshot, previousInventorySnapshot, StringComparison.Ordinal);
+            if (currentCount < previousCount)
+            {
+                return (true, inventoryChanged, currentCount);
+            }
+
+            if (inventoryChanged)
+            {
+                return (false, true, currentCount);
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        var finalVisibleBeasts = GetVisibleBestiaryCapturedBeasts();
+        var finalCount = finalVisibleBeasts.Count;
+        var finalInventoryChanged = !string.Equals(GetPlayerInventorySnapshot(GetVisiblePlayerInventoryItems()), previousInventorySnapshot, StringComparison.Ordinal);
+        var finalBestiaryChanged = finalCount < previousCount;
+        return (finalBestiaryChanged, finalInventoryChanged, finalCount);
+    }
+
+    private async Task<(bool Changed, int CurrentCount)> WaitForBestiaryUiChangeAfterInventoryChangeAsync(
+        int previousCount,
+        string previousFirstBeastIdentity,
+        string previousVisibleBeastSnapshot,
+        int? timeoutOverrideMs = null)
+    {
+        var timing = Settings.StashAutomation.Timing;
+        var startedAt = DateTime.UtcNow;
+        var timeoutMs = timeoutOverrideMs.HasValue && timeoutOverrideMs.Value > 0
+            ? timeoutOverrideMs.Value
+            : Math.Max(180, GetAutomationTimeoutMs(Math.Max(timing.FastPollDelayMs.Value * 2, GetServerLatencyMs())));
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < timeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+
+            var currentVisibleBeasts = GetVisibleBestiaryCapturedBeasts();
+            var currentCount = currentVisibleBeasts.Count;
+            if (currentCount < previousCount)
+            {
+                return (true, currentCount);
+            }
+
+            if (!string.Equals(GetBestiaryBeastIdentity(currentVisibleBeasts[0]), previousFirstBeastIdentity, StringComparison.Ordinal))
+            {
+                return (true, currentCount);
+            }
+
+            if (!string.Equals(GetBestiaryVisibleBeastSnapshot(currentVisibleBeasts), previousVisibleBeastSnapshot, StringComparison.Ordinal))
+            {
+                return (true, currentCount);
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs.Value);
+        }
+
+        return (false, GetVisibleBestiaryCapturedBeasts().Count);
+    }
+
+    private IList<NormalInventoryItem> GetVisiblePlayerInventoryItems()
+    {
+        var inventoryPanel = GameController?.IngameState?.IngameUi?.InventoryPanel;
+        return inventoryPanel?[InventoryIndex.PlayerInventory]?.VisibleInventoryItems;
+    }
+
+    private List<Element> GetVisibleBestiaryCapturedBeasts()
+    {
+        if (!TryGetBestiaryCapturedBeastsDisplay(out var beastsDisplay, out var visibleRect))
+        {
+            return [];
+        }
+
+        var visibleBeasts = new List<Element>();
+        foreach (var beastContainer in beastsDisplay.Children)
+        {
+            if (beastContainer == null || !beastContainer.IsVisible)
+            {
+                continue;
+            }
+
+            var beastList = beastContainer.GetChildAtIndex(1);
+            if (beastList?.Children == null)
+            {
+                continue;
+            }
+
+            foreach (var beastElement in beastList.Children)
+            {
+                if (!IsBestiaryCapturedBeastCandidate(beastElement, visibleRect))
+                {
+                    continue;
+                }
+
+                visibleBeasts.Add(beastElement);
+            }
+        }
+
+        if (visibleBeasts.Count <= 0)
+        {
+            foreach (var beastElement in EnumerateDescendants(beastsDisplay))
+            {
+                if (!IsBestiaryCapturedBeastCandidate(beastElement, visibleRect))
+                {
+                    continue;
+                }
+
+                visibleBeasts.Add(beastElement);
+            }
+        }
+
+        return visibleBeasts
+            .GroupBy(element =>
+            {
+                var rect = element.GetClientRect();
+                return new { rect.Left, rect.Top, rect.Right, rect.Bottom };
+            })
+            .Select(group => group
+                .OrderByDescending(element => element.Entity != null)
+                .ThenByDescending(element => element.Children?.Count ?? 0)
+                .First())
+            .OrderBy(element => element.GetClientRect().Top)
+            .ThenBy(element => element.GetClientRect().Left)
+            .ToList();
+    }
+
+    private static bool IsBestiaryCapturedBeastCandidate(Element beastElement, RectangleF visibleRect)
+    {
+        if (beastElement?.IsVisible != true)
+        {
+            return false;
+        }
+
+        var rect = beastElement.GetClientRect();
+        if (!IsRectMostlyInside(rect, visibleRect))
+        {
+            return false;
+        }
+
+        if (rect.Width < 16 || rect.Height < 16)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(GetBestiaryBeastLabel(beastElement)))
+        {
+            return false;
+        }
+
+        return beastElement.Entity != null || EnumerateDescendants(beastElement).Any(child => child?.Entity != null);
+    }
+
+    private static string GetBestiaryBeastLabel(Element beastElement)
+    {
+        if (beastElement == null)
+        {
+            return null;
+        }
+
+        var entityName = beastElement.Entity?.GetComponent<Base>()?.Name?.Trim();
+        if (!string.IsNullOrWhiteSpace(entityName))
+        {
+            return entityName;
+        }
+
+        var entityMetadata = beastElement.Entity?.Metadata?.Trim();
+        if (!string.IsNullOrWhiteSpace(entityMetadata))
+        {
+            return entityMetadata;
+        }
+
+        return GetElementTextRecursive(beastElement, 2);
+    }
+
+    private static string GetBestiaryBeastIdentity(Element beastElement)
+    {
+        if (beastElement == null)
+        {
+            return null;
+        }
+
+        var rect = beastElement.GetClientRect();
+        var nameText = GetBestiaryBeastLabel(beastElement);
+        return $"{nameText ?? string.Empty}|{rect.Left:0.##}|{rect.Top:0.##}|{rect.Right:0.##}|{rect.Bottom:0.##}";
+    }
+
+    private static string GetBestiaryVisibleBeastSnapshot(IReadOnlyList<Element> visibleBeasts)
+    {
+        if (visibleBeasts == null || visibleBeasts.Count <= 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(" || ", visibleBeasts.Select(GetBestiaryBeastIdentity));
+    }
+
+    private static string GetPlayerInventorySnapshot(IList<NormalInventoryItem> inventoryItems)
+    {
+        if (inventoryItems == null || inventoryItems.Count <= 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(
+            " || ",
+            inventoryItems
+                .Where(item => item?.Item != null)
+                .OrderBy(item => item.GetClientRect().Top)
+                .ThenBy(item => item.GetClientRect().Left)
+                .Select(item =>
+                {
+                    var rect = item.GetClientRect();
+                    var stackSize = item.Item.GetComponent<Stack>()?.Size ?? 1;
+                    return $"{item.Item.Metadata}|{stackSize}|{rect.Left:0.##}|{rect.Top:0.##}|{rect.Right:0.##}|{rect.Bottom:0.##}";
+                }));
     }
 
     private async Task<int> WaitForMapStashPageQuantityToChangeAsync(string metadata, int previousQuantity)
