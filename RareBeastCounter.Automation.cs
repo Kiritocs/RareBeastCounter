@@ -19,12 +19,12 @@ namespace RareBeastCounter;
 
 public partial class RareBeastCounter
 {
-    private static readonly int[] FragmentStashScarabTabPath = [2, 0, 0, 1, 1, 24, 0, 5, 0, 1];
-    private static readonly int[] MapStashTierOneToNineTabPath = [2, 0, 0, 1, 1, 2, 0, 0];
-    private static readonly int[] MapStashTierTenToSixteenTabPath = [2, 0, 0, 1, 1, 2, 0, 1];
-    private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 2, 0, 3, 0];
+    private static readonly int[] FragmentStashScarabTabPath = [2, 0, 0, 1, 1, 1, 0, 5, 0, 1];
+    private static readonly int[] MapStashTierOneToNineTabPath = [2, 0, 0, 1, 1, 3, 0, 0];
+    private static readonly int[] MapStashTierTenToSixteenTabPath = [2, 0, 0, 1, 1, 3, 0, 1];
+    private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 3, 0, 3, 0];
     private static readonly int[] MapStashPageNumberPath = [0, 1];
-    private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 2, 0, 4];
+    private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
     private string _lastAutomationStatusMessage;
     private bool _isAutomationRunning;
     private bool _isAutomationStopRequested;
@@ -711,10 +711,34 @@ public partial class RareBeastCounter
 
     private static int? GetMapStashPageNumber(Element pageTab)
     {
-        var pageNumberText = pageTab?.GetChildFromIndices(MapStashPageNumberPath)?.GetText(16)?.Trim();
+        var pageNumberElement = TryGetChildFromIndicesQuietly(pageTab, MapStashPageNumberPath);
+        var pageNumberText = pageNumberElement?.GetText(16)?.Trim();
         return int.TryParse(pageNumberText, out var pageNumber) && pageNumber is >= 1 and <= 6
             ? pageNumber
             : null;
+    }
+
+    private static Element TryGetChildFromIndicesQuietly(Element root, IReadOnlyList<int> path)
+    {
+        var current = root;
+        if (current == null || path == null)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < path.Count; i++)
+        {
+            var children = current.Children;
+            var childIndex = path[i];
+            if (children == null || childIndex < 0 || childIndex >= children.Count)
+            {
+                return null;
+            }
+
+            current = children[childIndex];
+        }
+
+        return current;
     }
 
     private IList<Element> GetVisibleMapStashPageItems()
@@ -726,18 +750,40 @@ public partial class RareBeastCounter
             return null;
         }
 
-        var visibleChild = pageContent.Children?.FirstOrDefault(child => child?.IsVisible == true);
-        if (visibleChild == null)
+        var items = new List<Element>();
+        CollectVisibleEntityDescendants(pageContent, items);
+        if (items.Count <= 0)
         {
-            LogAutomationDebug($"GetVisibleMapStashPageItems found no visible child in page content. content={DescribeElement(pageContent)}, children={DescribeChildren(pageContent)}");
+            LogAutomationDebug($"GetVisibleMapStashPageItems found no visible entity descendants in page content. content={DescribeElement(pageContent)}, children={DescribeChildren(pageContent)}");
             return null;
         }
 
-        var items = visibleChild.Children?
-            .Where(child => child?.Entity != null)
-            .ToList();
-        LogAutomationDebug($"GetVisibleMapStashPageItems resolved visibleChild={DescribeElement(visibleChild)}, itemCount={items?.Count ?? 0}");
+        LogAutomationDebug($"GetVisibleMapStashPageItems resolved content={DescribeElement(pageContent)}, itemCount={items.Count}");
         return items;
+    }
+
+    private static void CollectVisibleEntityDescendants(Element root, ICollection<Element> results)
+    {
+        if (root == null || results == null)
+        {
+            return;
+        }
+
+        if (root.IsVisible && root.Entity != null)
+        {
+            results.Add(root);
+        }
+
+        var children = root.Children;
+        if (children == null)
+        {
+            return;
+        }
+
+        foreach (var child in children)
+        {
+            CollectVisibleEntityDescendants(child, results);
+        }
     }
 
     private async Task<Element> WaitForNextMatchingMapStashPageItemAsync(string metadata)
@@ -807,6 +853,16 @@ public partial class RareBeastCounter
         }
 
         return items.Count(item => string.Equals(item?.Entity?.Metadata, metadata, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string DescribeEntity(Entity entity)
+    {
+        if (entity == null)
+        {
+            return "entity=null";
+        }
+
+        return $"name='{entity.GetComponent<Base>()?.Name}', metadata='{entity.Metadata}'";
     }
 
     private bool MapStashVisiblePageContainsMatch(string itemName, string metadata)
