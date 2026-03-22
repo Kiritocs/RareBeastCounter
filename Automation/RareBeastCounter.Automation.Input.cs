@@ -590,6 +590,25 @@ public partial class RareBeastCounter
         await DelayAutomationAsync(postClickDelayMs);
     }
 
+    private async Task ApplyBestiarySearchRegexAsync(string regex)
+    {
+        ThrowIfAutomationStopRequested();
+
+        if (string.IsNullOrWhiteSpace(regex))
+        {
+            throw new InvalidOperationException("Configured Bestiary Regex is empty.");
+        }
+
+        ReleaseAutomationModifierKeys();
+        ImGui.SetClipboardText(regex);
+
+        var timing = AutomationTiming;
+        await CtrlTapKeyAsync(Keys.F, timing.KeyTapDelayMs, timing.FastPollDelayMs);
+        await CtrlTapKeyAsync(Keys.A, timing.KeyTapDelayMs, timing.KeyTapDelayMs);
+        await PasteClipboardAsync();
+        await DelayForUiCheckAsync(150);
+    }
+
     private async Task SendChatCommandAsync(string command)
     {
         ThrowIfAutomationStopRequested();
@@ -780,6 +799,46 @@ public partial class RareBeastCounter
             postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs, Settings.StashAutomation.TabSwitchDelayMs.Value));
     }
 
+    private async Task<bool> EnsureMenagerieEinharInteractionAsync()
+    {
+        ThrowIfAutomationStopRequested();
+
+        if (IsBestiaryChallengePanelOpen())
+        {
+            return true;
+        }
+
+        var timing = AutomationTiming;
+        while (!IsBestiaryChallengePanelOpen())
+        {
+            ThrowIfAutomationStopRequested();
+
+            var einhar = await WaitForMenagerieEinharAsync();
+            if (einhar == null)
+            {
+                UpdateAutomationStatus("Could not find Einhar in The Menagerie.");
+                return false;
+            }
+
+            var distance = GetPlayerDistanceToEntity(einhar);
+            var statusMessage = distance.HasValue && distance.Value <= timing.StashInteractionDistance
+                ? "Opening Einhar..."
+                : "Moving to Einhar...";
+
+            UpdateAutomationStatus(statusMessage);
+            await CtrlClickWorldEntityAsync(einhar);
+
+            if (IsBestiaryChallengePanelOpen() || await WaitForBestiaryCapturedBeastsButtonAsync())
+            {
+                return true;
+            }
+
+            await DelayAutomationAsync(timing.StashOpenPollDelayMs);
+        }
+
+        return true;
+    }
+
     private Element TryGetBestiaryCapturedBeastsButton()
     {
         try
@@ -848,19 +907,9 @@ public partial class RareBeastCounter
             return;
         }
 
-        if (!IsBestiaryChallengePanelOpen())
+        if (!await EnsureMenagerieEinharInteractionAsync())
         {
-            var einhar = await WaitForMenagerieEinharAsync();
-            if (einhar == null)
-            {
-                throw new InvalidOperationException("Could not find Einhar in The Menagerie.");
-            }
-
-            await CtrlClickWorldEntityAsync(einhar);
-            if (!await WaitForBestiaryCapturedBeastsButtonAsync())
-            {
-                throw new InvalidOperationException("Timed out opening the challenge panel.");
-            }
+            throw new InvalidOperationException("Timed out opening the challenge panel.");
         }
 
         var capturedBeastsButton = TryGetBestiaryCapturedBeastsButton();
@@ -1028,6 +1077,13 @@ public partial class RareBeastCounter
                             $"Inventory filled after {RareBeastCounterHelpers.FormatDuration(elapsed)} ({elapsed.TotalSeconds:F1}s) from the first itemized beast.",
                             requireDebugLogging: false);
                         firstItemizedBeastAtUtc = null;
+                    }
+
+                    if (!ShouldAutoStashBestiaryItemizedBeasts())
+                    {
+                        _bestiaryInventoryFullStop = true;
+                        UpdateAutomationStatus("Bestiary clear stopped. Inventory is full and regex itemize auto-stash is disabled.", forceLog: true);
+                        return releasedBeastCount;
                     }
 
                     await StashCapturedMonstersAndReturnToBestiaryAsync();
@@ -1739,6 +1795,11 @@ public partial class RareBeastCounter
         var movedCount = await StashCapturedMonstersIntoConfiguredTabAsync();
         await CloseBestiaryWorldUiAsync();
         await EnsureBestiaryCapturedBeastsWindowOpenAsync();
+        if (!string.IsNullOrWhiteSpace(_activeBestiarySearchRegex))
+        {
+            await ApplyBestiarySearchRegexAsync(_activeBestiarySearchRegex);
+        }
+
         return movedCount;
     }
 

@@ -218,20 +218,22 @@ public class BeastPricesSettings
     internal string LastUpdated { get; set; } = "never";
 
     [JsonIgnore]
-    internal HashSet<string> EnabledBeasts { get; set; } = new();
+    internal HashSet<string> EnabledBeasts { get; set; } = new(System.StringComparer.OrdinalIgnoreCase);
 
     [JsonProperty("LastUpdated")]
-    private string SavedLastUpdated
+    public string SavedLastUpdated
     {
         get => LastUpdated;
         set => LastUpdated = value ?? "never";
     }
 
     [JsonProperty("EnabledBeasts")]
-    private List<string> SavedEnabledBeasts
+    public List<string> SavedEnabledBeasts
     {
         get => new(EnabledBeasts);
-        set => EnabledBeasts = value != null ? new HashSet<string>(value) : new HashSet<string>();
+        set => EnabledBeasts = value != null
+            ? new HashSet<string>(value, System.StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
     }
 
     [Menu("Enabled Beasts", "Choose which beasts count as enabled for filtering, analytics, and Bestiary auto-regex generation.")]
@@ -303,6 +305,12 @@ public class BestiaryAutomationSettings
 {
     [Menu("Clear Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, and clears captured beasts.")]
     public HotkeyNode ClearHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Regex Itemize Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, focuses Bestiary search, pastes the configured Bestiary Regex, and itemizes the matching beasts.")]
+    public HotkeyNode RegexItemizeHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Regex Itemize Auto-Stash", "When enabled, the regex itemize hotkey auto-stashes itemized beasts when inventory fills and after finishing. When disabled, itemized beasts remain in inventory and regex itemizing stops once inventory is full.")]
+    public ToggleNode RegexItemizeAutoStash { get; set; } = new(true);
 
     [Menu("Delete Beasts Instead Of Itemizing", "When disabled, Bestiary clear itemizes beasts. When enabled, it clicks the delete button for beasts instead.")]
     public ToggleNode DeleteBeastsInsteadOfItemizing { get; set; } = new(false);

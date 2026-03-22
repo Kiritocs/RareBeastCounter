@@ -49,6 +49,8 @@ public partial class RareBeastCounter
             {
                 if (isEnabled) enabledBeasts.Add(beast.Name);
                 else enabledBeasts.Remove(beast.Name);
+
+                SavePersistedBeastPriceSettings();
             }
 
             ImGui.TableNextColumn();
@@ -94,6 +96,7 @@ public partial class RareBeastCounter
             _beastPrices = updated;
             RebuildPriceCaches(updated);
             Settings.BeastPrices.LastUpdated = DateTime.Now.ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            SavePersistedBeastPriceSettings();
             DebugWindow.LogMsg($"[RareBeastCounter] Beast prices updated ({Settings.BeastPrices.LastUpdated}).");
         }
         catch (Exception ex)

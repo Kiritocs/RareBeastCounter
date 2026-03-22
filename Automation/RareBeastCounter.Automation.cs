@@ -34,6 +34,7 @@ public partial class RareBeastCounter
     private static readonly int[] MapStashPageTabPath = [2, 0, 0, 1, 1, 3, 0, 3, 0];
     private static readonly int[] MapStashPageNumberPath = [0, 1];
     private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
+    private const int MenagerieTravelTimeoutMs = 15000;
     private const int BestiaryReleaseTimeoutMs = 250;
     private const int MapTransferExtraConfirmationDelayMs = 10;
     private const int QuantitySettleStableWindowMs = 100;
@@ -43,6 +44,9 @@ public partial class RareBeastCounter
     private bool _isBestiaryClearRunning;
     private bool _isAutomationStopRequested;
     private bool? _bestiaryDeleteModeOverride;
+    private bool? _bestiaryAutoStashOverride;
+    private bool _bestiaryInventoryFullStop;
+    private string _activeBestiarySearchRegex;
     private int _lastAutomationFragmentScarabTabIndex = -1;
     private int _lastAutomationMapStashTierSelection = -1;
     private int _lastAutomationMapStashPageNumber = -1;
@@ -135,6 +139,13 @@ public partial class RareBeastCounter
         if (availableInventorySlots > 0)
         {
             return true;
+        }
+
+        if (!ShouldAutoStashBestiaryItemizedBeasts())
+        {
+            _bestiaryInventoryFullStop = true;
+            UpdateAutomationStatus("Bestiary clear stopped. Inventory is full and regex itemize auto-stash is disabled.", forceLog: true);
+            return false;
         }
 
         await StashCapturedMonstersAndReturnToBestiaryAsync();
@@ -230,14 +241,7 @@ public partial class RareBeastCounter
 
         try
         {
-            if (!IsInMenagerie())
-            {
-                await SendChatCommandAsync("/menagerie");
-                if (!await WaitForAreaNameAsync(MenagerieAreaName, 5000))
-                {
-                    throw new InvalidOperationException("Timed out travelling to The Menagerie.");
-                }
-            }
+            await EnsureTravelToMenagerieAsync();
 
             await EnsureBestiaryCapturedBeastsWindowOpenAsync();
 
@@ -276,14 +280,108 @@ public partial class RareBeastCounter
         }
     }
 
+    private async Task RunBestiaryRegexItemizeAutomationFromHotkeyAsync()
+    {
+        if (_isAutomationRunning)
+        {
+            RequestAutomationStop();
+            return;
+        }
+
+        var regex = GetConfiguredBestiaryRegex();
+        if (string.IsNullOrWhiteSpace(regex))
+        {
+            UpdateAutomationStatus("Bestiary regex itemize stopped. Bestiary Regex is empty.", forceLog: true);
+            return;
+        }
+
+        _bestiaryDeleteModeOverride = false;
+        _bestiaryAutoStashOverride = Settings.BestiaryAutomation.RegexItemizeAutoStash.Value;
+        BeginAutomationRun(isBestiaryClearRunning: true);
+
+        try
+        {
+            await EnsureTravelToMenagerieAsync();
+
+            await EnsureBestiaryCapturedBeastsWindowOpenAsync();
+
+            UpdateAutomationStatus("Applying Bestiary Regex...");
+            _activeBestiarySearchRegex = regex;
+            await ApplyBestiarySearchRegexAsync(regex);
+
+            if (!await EnsureBestiaryItemizingCapacityAsync())
+            {
+                return;
+            }
+
+            UpdateAutomationStatus("Itemizing Bestiary regex matches...");
+            var itemizedBeastCount = await ClearCapturedBeastsAsync();
+            if (ShouldAutoStashBestiaryItemizedBeasts())
+            {
+                await StashCapturedMonstersAndCloseUiAsync();
+            }
+
+            UpdateAutomationStatus(_bestiaryInventoryFullStop
+                ? $"Bestiary regex itemize stopped. Itemized {itemizedBeastCount} beast{(itemizedBeastCount == 1 ? string.Empty : "s")}. Inventory is full."
+                : itemizedBeastCount > 0
+                    ? $"Bestiary regex itemize complete. Itemized {itemizedBeastCount} beast{(itemizedBeastCount == 1 ? string.Empty : "s")}."
+                    : "Bestiary regex itemize complete. No captured beasts matched the configured Bestiary Regex.", forceLog: true);
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        catch (Exception ex)
+        {
+            LogAutomationError("Bestiary regex itemize failed.", ex);
+            UpdateAutomationStatus($"Bestiary regex itemize failed: {ex.Message}");
+        }
+        finally
+        {
+            EndAutomationRun(clearBestiaryDeleteModeOverride: true);
+        }
+    }
+
     #endregion
     #region Shared automation state
 
+    private async Task EnsureTravelToMenagerieAsync()
+    {
+        if (IsInMenagerie())
+        {
+            return;
+        }
+
+        for (var attempt = 1; attempt <= 2; attempt++)
+        {
+            UpdateAutomationStatus("Travelling to The Menagerie...");
+            LogAutomationDebug($"Travelling to The Menagerie. attempt={attempt}, currentArea='{GameController?.Area?.CurrentArea?.Name ?? "<null>"}'");
+
+            await SendChatCommandAsync("/menagerie");
+            if (await WaitForAreaNameAsync(MenagerieAreaName, MenagerieTravelTimeoutMs) || IsInMenagerie())
+            {
+                return;
+            }
+
+            LogAutomationDebug($"Menagerie travel attempt {attempt} timed out. currentArea='{GameController?.Area?.CurrentArea?.Name ?? "<null>"}'");
+            await DelayForUiCheckAsync(250);
+        }
+
+        throw new InvalidOperationException($"Timed out travelling to The Menagerie. Current area: '{GameController?.Area?.CurrentArea?.Name ?? "<null>"}'.");
+    }
+
     private void ResetAutomationState()
     {
+        _bestiaryAutoStashOverride = null;
+        _bestiaryInventoryFullStop = false;
+        _activeBestiarySearchRegex = null;
         _lastAutomationFragmentScarabTabIndex = -1;
         _lastAutomationMapStashTierSelection = -1;
         _lastAutomationMapStashPageNumber = -1;
+    }
+
+    private bool ShouldAutoStashBestiaryItemizedBeasts()
+    {
+        return _bestiaryAutoStashOverride ?? true;
     }
 
     private void RequestAutomationStop()

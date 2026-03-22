@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -12,6 +13,7 @@ using ExileCore.PoEMemory.MemoryObjects;
 using ExileCore.Shared.Enums;
 using ExileCore.Shared.Nodes;
 using ImGuiNET;
+using Newtonsoft.Json.Linq;
 using SharpDX;
 using Vector2 = System.Numerics.Vector2;
 
@@ -24,8 +26,6 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private const string MissingTrackedBeastName = "\0";
     private static readonly GameStat? IsCapturableMonsterStat = TryGetCapturableMonsterStat();
     private static readonly Regex QuestProgressRegex = new(@"\((\d+)/(\d+)\)", RegexOptions.Compiled);
-
-    private static readonly string[] DefaultEnabledBeasts = RareBeastCounterBeastData.DefaultEnabledBeasts;
 
     private static readonly TrackedBeast[] AllRedBeasts = RareBeastCounterBeastData.AllRedBeasts;
 
@@ -50,6 +50,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private bool _isCurrentAreaTrackable;
     private string _activeMapAreaHash;
     private bool _wasBestiaryTabVisible;
+    private bool _isBestiaryClipboardPasteRunning;
     private Type _cachedGameType;
     private System.Reflection.PropertyInfo _cachedIsEscapeStateProperty;
 
@@ -87,8 +88,14 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         InitializeAutomationSettingsUi(stashAutomation);
         InitializeBestiaryAutomationSettingsUi(Settings.BestiaryAutomation);
 
-        EnsureDefaultEnabledBeasts();
+        LoadPersistedBeastPriceSettings();
         QueuePriceFetch();
+    }
+
+    public override void OnClose()
+    {
+        base.OnClose();
+        SavePersistedBeastPriceSettings();
     }
 
     private void InitializeCurrentAreaTracking(DateTime now)
@@ -102,18 +109,71 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         }
     }
 
-    private void EnsureDefaultEnabledBeasts()
+    private void LoadPersistedBeastPriceSettings()
     {
-        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
-        if (enabledBeasts.Count > 0)
+        try
         {
-            return;
-        }
+            var settingsPath = GetRareBeastCounterSettingsFilePath();
+            if (!File.Exists(settingsPath))
+            {
+                return;
+            }
 
-        foreach (var name in DefaultEnabledBeasts)
-        {
-            enabledBeasts.Add(name);
+            var root = JObject.Parse(File.ReadAllText(settingsPath));
+            if (root["BeastPrices"] is not JObject beastPricesSection)
+            {
+                return;
+            }
+
+            Settings.BeastPrices.LastUpdated = beastPricesSection["LastUpdated"]?.Value<string>() ?? Settings.BeastPrices.LastUpdated;
+
+            if (beastPricesSection["EnabledBeasts"] is JArray enabledBeastsArray)
+            {
+                Settings.BeastPrices.EnabledBeasts = new HashSet<string>(
+                    enabledBeastsArray.Values<string>().Where(x => !string.IsNullOrWhiteSpace(x)),
+                    StringComparer.OrdinalIgnoreCase);
+            }
         }
+        catch (Exception ex)
+        {
+            DebugWindow.LogMsg($"[RareBeastCounter] Failed to load persisted beast price settings: {ex.Message}");
+        }
+    }
+
+    private void SavePersistedBeastPriceSettings()
+    {
+        try
+        {
+            var settingsPath = GetRareBeastCounterSettingsFilePath();
+            Directory.CreateDirectory(Path.GetDirectoryName(settingsPath)!);
+
+            JObject root;
+            if (File.Exists(settingsPath))
+            {
+                var content = File.ReadAllText(settingsPath);
+                root = string.IsNullOrWhiteSpace(content) ? new JObject() : JObject.Parse(content);
+            }
+            else
+            {
+                root = new JObject();
+            }
+
+            var beastPricesSection = root["BeastPrices"] as JObject ?? new JObject();
+            beastPricesSection["LastUpdated"] = Settings.BeastPrices.LastUpdated;
+            beastPricesSection["EnabledBeasts"] = new JArray(Settings.BeastPrices.EnabledBeasts.OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
+            root["BeastPrices"] = beastPricesSection;
+
+            File.WriteAllText(settingsPath, root.ToString());
+        }
+        catch (Exception ex)
+        {
+            DebugWindow.LogMsg($"[RareBeastCounter] Failed to save persisted beast price settings: {ex.Message}");
+        }
+    }
+
+    private static string GetRareBeastCounterSettingsFilePath()
+    {
+        return Path.Combine(Directory.GetCurrentDirectory(), "config", "global", SettingsFileName);
     }
 
     private void QueuePriceFetch()
@@ -302,6 +362,14 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private void HandleAutomationHotkey()
     {
         var automation = Settings.StashAutomation;
+
+        var bestiaryRegexItemizeHotkey = Settings.BestiaryAutomation.RegexItemizeHotkey;
+        if (bestiaryRegexItemizeHotkey.Value != Keys.None && bestiaryRegexItemizeHotkey.PressedOnce())
+        {
+            LogAutomationDebug($"Bestiary regex itemize hotkey pressed. key={bestiaryRegexItemizeHotkey.Value}");
+            _ = RunBestiaryRegexItemizeAutomationFromHotkeyAsync();
+            return;
+        }
 
         var bestiaryClearHotkey = Settings.BestiaryAutomation.ClearHotkey;
         if (bestiaryClearHotkey.Value != Keys.None && bestiaryClearHotkey.PressedOnce())
@@ -560,13 +628,53 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var isVisible = IsBestiaryTabVisible();
         if (isVisible && !_wasBestiaryTabVisible)
         {
-            var regex = Settings.BestiaryClipboard.UseAutoRegex.Value
-                ? BuildAutoRegexFromEnabledBeasts()
-                : (Settings.BestiaryClipboard.BeastRegex.Value ?? string.Empty);
+            var regex = GetConfiguredBestiaryRegex();
             ImGui.SetClipboardText(regex);
+
+            if (!_isAutomationRunning &&
+                !_isBestiaryClipboardPasteRunning &&
+                !string.IsNullOrWhiteSpace(regex))
+            {
+                _ = AutoPasteBestiaryClipboardAsync(regex);
+            }
         }
 
         _wasBestiaryTabVisible = isVisible;
+    }
+
+    private async Task AutoPasteBestiaryClipboardAsync(string regex)
+    {
+        if (_isAutomationRunning || _isBestiaryClipboardPasteRunning || string.IsNullOrWhiteSpace(regex))
+        {
+            return;
+        }
+
+        _isBestiaryClipboardPasteRunning = true;
+        try
+        {
+            await DelayForUiCheckAsync(50);
+            if (_isAutomationRunning || !IsBestiaryTabVisible())
+            {
+                return;
+            }
+
+            await ApplyBestiarySearchRegexAsync(regex);
+        }
+        catch (Exception ex)
+        {
+            LogAutomationDebug($"Bestiary clipboard auto-paste skipped. {ex.GetType().Name}: {ex.Message}");
+        }
+        finally
+        {
+            _isBestiaryClipboardPasteRunning = false;
+        }
+    }
+
+    private string GetConfiguredBestiaryRegex()
+    {
+        return Settings.BestiaryClipboard.UseAutoRegex.Value
+            ? BuildAutoRegexFromEnabledBeasts()
+            : (Settings.BestiaryClipboard.BeastRegex.Value ?? string.Empty);
     }
 
     private string BuildAutoRegexFromEnabledBeasts()

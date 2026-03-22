@@ -584,36 +584,31 @@ public partial class RareBeastCounter
     {
         if (!TryGetBestiaryCapturedBeastsDisplay(out var beastsDisplay, out var visibleRect)) return;
 
-        foreach (var beastContainer in beastsDisplay.Children)
+        var visibleBeasts = GetVisibleBestiaryCapturedBeasts();
+        foreach (var beastEl in visibleBeasts)
         {
-            if (beastContainer == null || !beastContainer.IsVisible) continue;
-            var beastList = beastContainer.GetChildAtIndex(1);
-            if (beastList == null) continue;
-
-            foreach (var beastEl in beastList.Children)
+            try
             {
-                try
-                {
-                    var nameText = beastEl?.Tooltip?.GetChildAtIndex(1)?.GetChildAtIndex(0)?.Text
-                        ?.Replace("-", "").Trim();
-                    if (string.IsNullOrEmpty(nameText)) continue;
-                    if (!_beastPrices.TryGetValue(nameText, out var price) || price < 0) continue;
+                var nameText = beastEl?.Tooltip?.GetChildAtIndex(1)?.GetChildAtIndex(0)?.Text
+                    ?.Replace("-", "").Trim();
+                nameText ??= GetBestiaryBeastLabel(beastEl)?.Trim();
+                if (string.IsNullOrEmpty(nameText)) continue;
+                if (!_beastPrices.TryGetValue(nameText, out var price) || price < 0) continue;
 
-                    var rect = beastEl.GetClientRect();
-                    if (!IsRectMostlyInside(rect, visibleRect)) continue;
+                var rect = beastEl.GetClientRect();
+                if (!IsRectMostlyInside(rect, visibleRect)) continue;
 
-                    var center = new Vector2(rect.Center.X, rect.Center.Y);
+                var center = new Vector2(rect.Center.X, rect.Center.Y);
 
-                    Graphics.DrawBox(rect, new Color(0, 0, 0, 0.5f));
-                    Graphics.DrawFrame(rect, Color.White, 2);
-                    Graphics.DrawText(nameText, center, Color.White, FontAlign.Center);
-                    Graphics.DrawText($"{price.ToString(CultureInfo.InvariantCulture)}c",
-                        center + new Vector2(0, 20), Color.White, FontAlign.Center);
-                }
-                catch
-                {
-                    // UI element navigation can fail on panel transitions
-                }
+                Graphics.DrawBox(rect, new Color(0, 0, 0, 0.5f));
+                Graphics.DrawFrame(rect, Color.White, 2);
+                Graphics.DrawText(nameText, center, Color.White, FontAlign.Center);
+                Graphics.DrawText($"{price.ToString(CultureInfo.InvariantCulture)}c",
+                    center + new Vector2(0, 20), Color.White, FontAlign.Center);
+            }
+            catch
+            {
+                // UI element navigation can fail on panel transitions
             }
         }
     }
