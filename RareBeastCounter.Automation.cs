@@ -3356,15 +3356,15 @@ public partial class RareBeastCounter
             var endY = Math.Min(playerInventory.Rows, inventoryItem.PosY + inventoryItem.SizeY);
 
             for (var x = startX; x < endX; x++)
-            for (var y = startY; y < endY; y++)
-                occupiedSlots[x, y] = true;
+                for (var y = startY; y < endY; y++)
+                    occupiedSlots[x, y] = true;
         }
 
         var freeCellCount = 0;
         for (var x = 0; x < playerInventory.Columns; x++)
-        for (var y = 0; y < playerInventory.Rows; y++)
-            if (!occupiedSlots[x, y])
-                freeCellCount++;
+            for (var y = 0; y < playerInventory.Rows; y++)
+                if (!occupiedSlots[x, y])
+                    freeCellCount++;
 
         return freeCellCount;
     }
