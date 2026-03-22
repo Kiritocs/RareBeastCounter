@@ -33,6 +33,12 @@ public class RareBeastCounterSettings : ISettings
 
     [Menu("Stash Automation", "Restock maps and beast scarabs from configured stash tabs and item names.")]
     public StashAutomationSettings StashAutomation { get; set; } = new();
+
+    [Menu("Bestiary Automation", "Teleport to The Menagerie and clear captured beasts using Bestiary-specific automation settings.")]
+    public BestiaryAutomationSettings BestiaryAutomation { get; set; } = new();
+
+    [Menu("Verbose Debug Logging", "Write detailed automation diagnostics for tab switching, Bestiary clear flow, map stash tier/page selection, and fragment scarab tab lookup.")]
+    public ToggleNode DebugLogging { get; set; } = new(false);
 }
 
 [Submenu(CollapsedByDefault = true)]
@@ -60,6 +66,9 @@ public class VisibilitySettings
 [Submenu(CollapsedByDefault = true)]
 public class CounterWindowSettings
 {
+    [Menu("Show", "Show or hide the main counter window.")]
+    public ToggleNode Show { get; set; } = new(true);
+
     [Menu("X Position (%)", "Horizontal position of the main counter window.")]
     public RangeNode<float> XPos { get; set; } = new(50, 0, 100);
 
@@ -251,9 +260,6 @@ public class StashAutomationSettings
     [Menu("Restock Hotkey", "Hotkey that triggers stash restock automation.")]
     public HotkeyNode RestockHotkey { get; set; } = new(Keys.None);
 
-    [Menu("Bestiary Clear Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, and ctrl-click releases beasts until none remain.")]
-    public HotkeyNode BestiaryClearHotkey { get; set; } = new(Keys.None);
-
     [Menu("Click Delay (ms)", "Delay between ctrl-click transfers.")]
     public RangeNode<int> ClickDelayMs { get; set; } = new(0, 0, 250);
 
@@ -262,12 +268,6 @@ public class StashAutomationSettings
 
     [Menu("Flat Extra Delay (ms)", "Additional fixed delay added on top of every automation delay and timeout.")]
     public RangeNode<int> FlatExtraDelayMs { get; set; } = new(0, 0, 500);
-
-    [Menu("Verbose Debug Logging", "Write detailed stash automation diagnostics for tab switching, map stash tier/page selection, and fragment scarab tab lookup.")]
-    public ToggleNode DebugLogging { get; set; } = new(false);
-
-    [Menu("Advanced Timing", "Advanced click, polling, and timeout timing values used by stash automation.")]
-    public StashAutomationTimingSettings Timing { get; set; } = new();
 
     [Menu("Target 1", "Source settings for the first customizable restock target.")]
     public StashAutomationTargetSettings Target1 { get; set; } = new() { ItemName = new TextNode("Map (Tier 16)"), Quantity = new RangeNode<int>(20, 0, 200) };
@@ -295,6 +295,46 @@ public class StashAutomationSettings
     {
         get => DynamicHints;
         set => DynamicHints = value ?? new StashAutomationDynamicHintSettings();
+    }
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class BestiaryAutomationSettings
+{
+    [Menu("Clear Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, and clears captured beasts.")]
+    public HotkeyNode ClearHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Delete Beasts Instead Of Itemizing", "When disabled, Bestiary clear itemizes beasts. When enabled, it clicks the delete button for beasts instead.")]
+    public ToggleNode DeleteBeastsInsteadOfItemizing { get; set; } = new(false);
+
+    [Menu("Show Bestiary Buttons", "Show or hide the Itemize All / Delete All quick buttons next to the Bestiary captured beasts button.")]
+    public ToggleNode ShowBestiaryButtons { get; set; } = new(false);
+
+    [Menu("Show Inventory Button", "Show or hide the Right Click All Beasts quick button next to the player inventory while in The Menagerie.")]
+    public ToggleNode ShowInventoryButton { get; set; } = new(false);
+
+    [Menu("Itemized Beasts Stash Tab", "Choose the stash tab used to store itemized captured beasts when the inventory fills or when Bestiary clear finishes.")]
+    [JsonIgnore] public CustomNode StashTabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedTabName { get; set; } = new(string.Empty);
+
+    [Menu("Red Beast Stash Tab", "Optional stash tab used to store itemized red beasts separately. When empty, red beasts fall back to the main Bestiary stash tab.")]
+    [JsonIgnore] public CustomNode RedBeastStashTabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedRedBeastTabName { get; set; } = new(string.Empty);
+
+    [JsonProperty("StashTabName")]
+    private string SavedStashTabName
+    {
+        get => SelectedTabName.Value;
+        set => SelectedTabName.Value = value ?? string.Empty;
+    }
+
+    [JsonProperty("RedBeastStashTabName")]
+    private string SavedRedBeastStashTabName
+    {
+        get => SelectedRedBeastTabName.Value;
+        set => SelectedRedBeastTabName.Value = value ?? string.Empty;
     }
 }
 
@@ -329,53 +369,6 @@ public class StashAutomationDynamicHintSettings
         get => MapStashPageContentRootPath;
         set => MapStashPageContentRootPath = value ?? [];
     }
-}
-
-[Submenu(CollapsedByDefault = true)]
-public class StashAutomationTimingSettings
-{
-    [Menu("Key Tap Delay (ms)", "Delay between pressing and releasing left/right when switching stash tabs.")]
-    public RangeNode<int> KeyTapDelayMs { get; set; } = new(1, 0, 100);
-
-    [Menu("Ctrl-Click Pre Delay (ms)", "Delay after moving the cursor onto an item before ctrl-clicking it.")]
-    public RangeNode<int> CtrlClickPreDelayMs { get; set; } = new(5, 0, 250);
-
-    [Menu("Ctrl-Click Post Delay (ms)", "Delay after a ctrl-click transfer completes.")]
-    public RangeNode<int> CtrlClickPostDelayMs { get; set; } = new(5, 0, 250);
-
-    [Menu("UI Click Pre Delay (ms)", "Delay after moving the cursor onto stash UI buttons before clicking them.")]
-    public RangeNode<int> UiClickPreDelayMs { get; set; } = new(15, 0, 250);
-
-    [Menu("Min Tab Click Post Delay (ms)", "Minimum delay after clicking a stash subtab or page button.")]
-    public RangeNode<int> MinTabClickPostDelayMs { get; set; } = new(15, 0, 250);
-
-    [Menu("Fast Poll Delay (ms)", "Polling interval for quick stash refresh checks such as page, quantity, and tab changes.")]
-    public RangeNode<int> FastPollDelayMs { get; set; } = new(15, 0, 250);
-
-    [Menu("Stash Open Poll Delay (ms)", "Polling interval while waiting for the stash window to open.")]
-    public RangeNode<int> StashOpenPollDelayMs { get; set; } = new(30, 0, 500);
-
-    [Menu("Stash Interaction Distance", "Maximum player-to-stash grid distance considered close enough to attempt opening the stash.")]
-    public RangeNode<int> StashInteractionDistance { get; set; } = new(18, 1, 100);
-
-    [Menu("Tab Retry Delay (ms)", "Fallback delay before retrying when a stash tab switch did not register.")]
-    public RangeNode<int> TabRetryDelayMs { get; set; } = new(20, 0, 250);
-
-    [Menu("Tab Change Timeout Base (ms)", "Minimum timeout used while waiting for a stash tab index to change.")]
-    public RangeNode<int> TabChangeTimeoutMs { get; set; } = new(40, 0, 1000);
-
-    [Menu("Quantity Change Timeout Base (ms)", "Minimum timeout base used while waiting for transferred item quantities to update.")]
-    public RangeNode<int> QuantityChangeBaseDelayMs { get; set; } = new(100, 0, 1000);
-
-    [Menu("Open Stash Post Click Delay (ms)", "Delay after clicking the stash entity in the world.")]
-    public RangeNode<int> OpenStashPostClickDelayMs { get; set; } = new(250, 0, 1000);
-
-    [Menu("Fragment Tab Timeout Base (ms)", "Minimum timeout base used while waiting for fragment stash scarab controls.")]
-    public RangeNode<int> FragmentTabBaseTimeoutMs { get; set; } = new(50, 0, 2000);
-
-    [Menu("Visible Tab Timeout Base (ms)", "Base timeout used while waiting for the selected stash tab to become visible.")]
-    public RangeNode<int> VisibleTabTimeoutMs { get; set; } = new(50, 0, 5000);
-
 }
 
 [Submenu(CollapsedByDefault = true)]

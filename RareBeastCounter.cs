@@ -85,6 +85,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
 
         var stashAutomation = Settings.StashAutomation;
         InitializeAutomationSettingsUi(stashAutomation);
+        InitializeBestiaryAutomationSettingsUi(Settings.BestiaryAutomation);
 
         EnsureDefaultEnabledBeasts();
         QueuePriceFetch();
@@ -202,6 +203,8 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         ApplyPauseMenuTimerState(now);
         ApplyBestiaryClipboard();
         HandleAutomationHotkey();
+        DrawBestiaryAutomationQuickButtons();
+        DrawMenagerieInventoryQuickButton();
 
         var beastPrices = Settings.BeastPrices;
         var mapRender = Settings.MapRender;
@@ -300,7 +303,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     {
         var automation = Settings.StashAutomation;
 
-        var bestiaryClearHotkey = automation.BestiaryClearHotkey;
+        var bestiaryClearHotkey = Settings.BestiaryAutomation.ClearHotkey;
         if (bestiaryClearHotkey.Value != Keys.None && bestiaryClearHotkey.PressedOnce())
         {
             LogAutomationDebug($"Bestiary clear hotkey pressed. key={bestiaryClearHotkey.Value}");
@@ -345,22 +348,25 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var completedMessage = counterWindow.CompletedMessage;
         var showCompletedCounterStyle = allBeastsFound || completedCounter.ShowWhileNotComplete.Value;
 
-        var counterTextColor = showCompletedCounterStyle ? completedCounter.TextColor.Value : counterWindow.TextColor.Value;
-        var counterBorderColor = showCompletedCounterStyle ? completedCounter.BorderColor.Value : counterWindow.BorderColor.Value;
-        var counterTextScale = showCompletedCounterStyle ? completedCounter.TextScale.Value : counterWindow.TextScale.Value;
+        if (counterWindow.Show.Value)
+        {
+            var counterTextColor = showCompletedCounterStyle ? completedCounter.TextColor.Value : counterWindow.TextColor.Value;
+            var counterBorderColor = showCompletedCounterStyle ? completedCounter.BorderColor.Value : counterWindow.BorderColor.Value;
+            var counterTextScale = showCompletedCounterStyle ? completedCounter.TextScale.Value : counterWindow.TextScale.Value;
 
-        DrawOverlayWindow(
-            "##RareBeastCounterOverlay",
-            counterText,
-            counterWindow.XPos.Value,
-            counterWindow.YPos.Value,
-            counterWindow.Padding.Value,
-            counterWindow.BorderThickness.Value,
-            counterWindow.BorderRounding.Value,
-            counterTextScale,
-            counterTextColor,
-            counterBorderColor,
-            counterWindow.BackgroundColor.Value);
+            DrawOverlayWindow(
+                "##RareBeastCounterOverlay",
+                counterText,
+                counterWindow.XPos.Value,
+                counterWindow.YPos.Value,
+                counterWindow.Padding.Value,
+                counterWindow.BorderThickness.Value,
+                counterWindow.BorderRounding.Value,
+                counterTextScale,
+                counterTextColor,
+                counterBorderColor,
+                counterWindow.BackgroundColor.Value);
+        }
 
         var shouldShowCompletedMessage =
             completedMessage.Show.Value &&
