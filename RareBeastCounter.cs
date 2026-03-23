@@ -641,6 +641,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             ImGui.SetClipboardText(regex);
 
             if (!_isAutomationRunning &&
+                Settings.BestiaryClipboard.AutoPasteAfterCopy.Value &&
                 !_isBestiaryClipboardPasteRunning &&
                 !string.IsNullOrWhiteSpace(regex))
             {

@@ -249,6 +249,9 @@ public class BestiaryClipboardSettings
     [Menu("Enable Auto Copy", "Automatically copy a Bestiary search regex when the Bestiary tab becomes visible.")]
     public ToggleNode EnableAutoCopy { get; set; } = new(true);
 
+    [Menu("Auto Paste After Copy", "After auto-copying the Bestiary regex, also paste it into the Bestiary search field automatically.")]
+    public ToggleNode AutoPasteAfterCopy { get; set; } = new(true);
+
     [Menu("Generate Regex From Enabled Beasts", "Build the regex from Price Data -> Enabled Beasts instead of using the manual regex field.")]
     public ToggleNode UseAutoRegex { get; set; } = new(true);
 
