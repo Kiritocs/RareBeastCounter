@@ -45,6 +45,7 @@ public partial class RareBeastCounter
         try
         {
             ReleaseAutomationTriggerKeys();
+            await EnsureTravelToHideoutAsync();
 
             var listedCount = 0;
             var skippedNoPriceCount = 0;
@@ -259,6 +260,26 @@ public partial class RareBeastCounter
         }
 
         return GetOfflineMerchantPanel()?.IsVisible == true;
+    }
+
+    private async Task EnsureTravelToHideoutAsync()
+    {
+        if (GameController?.Area?.CurrentArea?.IsHideout == true)
+        {
+            return;
+        }
+
+        UpdateAutomationStatus("Travelling to hideout...");
+        await SendChatCommandAsync("/hideout");
+
+        var arrivedInHideout = await WaitForBestiaryConditionAsync(
+            () => GameController?.Area?.CurrentArea?.IsHideout == true,
+            GetAutomationTimeoutMs(10000),
+            Math.Max(AutomationTiming.FastPollDelayMs, 25));
+        if (!arrivedInHideout)
+        {
+            throw new InvalidOperationException("Timed out travelling to hideout before opening Faustus shop.");
+        }
     }
 
     private async Task<Entity> WaitForFaustusEntityAsync()
