@@ -618,13 +618,10 @@ public partial class RareBeastCounter
         beastsDisplay = null!;
         visibleRect = default;
 
-        var bestiaryPanel = GameController.IngameState.IngameUi.GetChildAtIndex(50)
-            ?.GetChildAtIndex(2)?.GetChildAtIndex(0)
-            ?.GetChildAtIndex(1)?.GetChildAtIndex(1)
-            ?.GetChildAtIndex(15);
+        var bestiaryPanel = TryGetBestiaryPanel();
         if (bestiaryPanel == null || !bestiaryPanel.IsVisible) return false;
 
-        var capturedPanel = bestiaryPanel.GetChildAtIndex(0)?.GetChildAtIndex(18);
+        var capturedPanel = TryGetBestiaryCapturedBeastsTab();
         if (capturedPanel == null || !capturedPanel.IsVisible) return false;
 
         var viewport = capturedPanel.GetChildAtIndex(1);

@@ -87,6 +87,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         var stashAutomation = Settings.StashAutomation;
         InitializeAutomationSettingsUi(stashAutomation);
         InitializeBestiaryAutomationSettingsUi(Settings.BestiaryAutomation);
+        InitializeMerchantAutomationSettingsUi(Settings.MerchantAutomation);
 
         LoadPersistedBeastPriceSettings();
         QueuePriceFetch();
@@ -376,6 +377,14 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         {
             LogAutomationDebug($"Bestiary clear hotkey pressed. key={bestiaryClearHotkey.Value}");
             _ = RunBestiaryClearAutomationFromHotkeyAsync();
+            return;
+        }
+
+        var faustusListHotkey = Settings.MerchantAutomation.FaustusListHotkey;
+        if (faustusListHotkey.Value != Keys.None && faustusListHotkey.PressedOnce())
+        {
+            LogAutomationDebug($"Faustus list hotkey pressed. key={faustusListHotkey.Value}");
+            _ = RunSellCapturedMonstersToFaustusAsync();
             return;
         }
 

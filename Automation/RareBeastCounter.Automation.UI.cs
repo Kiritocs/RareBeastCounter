@@ -86,6 +86,11 @@ public partial class RareBeastCounter
         automation.StashTabSelector.DrawDelegate = () => DrawBestiaryStashTabSelectorPanel(automation);
     }
 
+    private void InitializeMerchantAutomationSettingsUi(MerchantAutomationSettings automation)
+    {
+        automation.FaustusShopTabSelector.DrawDelegate = () => DrawFaustusShopTabSelectorPanel(automation);
+    }
+
     private void DrawMenagerieInventoryQuickButton()
     {
         if (Settings?.BestiaryAutomation?.ShowInventoryButton?.Value != true)
@@ -144,6 +149,11 @@ public partial class RareBeastCounter
     private void DrawBestiaryAutomationQuickButtons()
     {
         if (Settings?.BestiaryAutomation?.ShowBestiaryButtons?.Value != true)
+        {
+            return;
+        }
+
+        if (!IsBestiaryCapturedBeastsTabVisible())
         {
             return;
         }

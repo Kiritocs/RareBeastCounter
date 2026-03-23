@@ -37,6 +37,9 @@ public class RareBeastCounterSettings : ISettings
     [Menu("Bestiary Automation", "Teleport to The Menagerie and clear captured beasts using Bestiary-specific automation settings.")]
     public BestiaryAutomationSettings BestiaryAutomation { get; set; } = new();
 
+    [Menu("Merchant Automation", "List itemized beasts in Faustus shop tabs using merchant-specific automation settings.")]
+    public MerchantAutomationSettings MerchantAutomation { get; set; } = new();
+
     [Menu("Verbose Debug Logging", "Write detailed automation diagnostics for tab switching, Bestiary clear flow, map stash tier/page selection, and fragment scarab tab lookup.")]
     public ToggleNode DebugLogging { get; set; } = new(false);
 }
@@ -309,6 +312,16 @@ public class BestiaryAutomationSettings
     [Menu("Regex Itemize Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, focuses Bestiary search, pastes the configured Bestiary Regex, and itemizes the matching beasts.")]
     public HotkeyNode RegexItemizeHotkey { get; set; } = new(Keys.None);
 
+    [Menu("Itemized Beasts Stash Tab", "Choose the stash tab used to store itemized captured beasts when the inventory fills or when Bestiary clear finishes.")]
+    [JsonIgnore] public CustomNode StashTabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedTabName { get; set; } = new(string.Empty);
+
+    [Menu("Red Beast Stash Tab", "Optional stash tab used to store itemized red beasts separately. When empty, red beasts fall back to the main Bestiary stash tab.")]
+    [JsonIgnore] public CustomNode RedBeastStashTabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedRedBeastTabName { get; set; } = new(string.Empty);
+
     [Menu("Regex Itemize Auto-Stash", "When enabled, the regex itemize hotkey auto-stashes itemized beasts when inventory fills and after finishing. When disabled, itemized beasts remain in inventory and regex itemizing stops once inventory is full.")]
     public ToggleNode RegexItemizeAutoStash { get; set; } = new(true);
 
@@ -320,16 +333,6 @@ public class BestiaryAutomationSettings
 
     [Menu("Show Inventory Button", "Show or hide the Right Click All Beasts quick button next to the player inventory while in The Menagerie.")]
     public ToggleNode ShowInventoryButton { get; set; } = new(false);
-
-    [Menu("Itemized Beasts Stash Tab", "Choose the stash tab used to store itemized captured beasts when the inventory fills or when Bestiary clear finishes.")]
-    [JsonIgnore] public CustomNode StashTabSelector { get; set; } = new();
-
-    [JsonIgnore] internal TextNode SelectedTabName { get; set; } = new(string.Empty);
-
-    [Menu("Red Beast Stash Tab", "Optional stash tab used to store itemized red beasts separately. When empty, red beasts fall back to the main Bestiary stash tab.")]
-    [JsonIgnore] public CustomNode RedBeastStashTabSelector { get; set; } = new();
-
-    [JsonIgnore] internal TextNode SelectedRedBeastTabName { get; set; } = new(string.Empty);
 
     [JsonProperty("StashTabName")]
     private string SavedStashTabName
@@ -343,6 +346,25 @@ public class BestiaryAutomationSettings
     {
         get => SelectedRedBeastTabName.Value;
         set => SelectedRedBeastTabName.Value = value ?? string.Empty;
+    }
+}
+
+[Submenu(CollapsedByDefault = true)]
+public class MerchantAutomationSettings
+{
+    [Menu("Faustus List Hotkey", "Hotkey that finds Faustus, Ctrl+Alt+clicks him, opens the shop, and lists itemized beasts from inventory using beast price data.")]
+    public HotkeyNode FaustusListHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Faustus Shop Tab", "Choose the Faustus shop tab used when listing itemized beasts with the Faustus list hotkey.")]
+    [JsonIgnore] public CustomNode FaustusShopTabSelector { get; set; } = new();
+
+    [JsonIgnore] internal TextNode SelectedFaustusShopTabName { get; set; } = new(string.Empty);
+
+    [JsonProperty("FaustusShopTabName")]
+    private string SavedFaustusShopTabName
+    {
+        get => SelectedFaustusShopTabName.Value;
+        set => SelectedFaustusShopTabName.Value = value ?? string.Empty;
     }
 }
 

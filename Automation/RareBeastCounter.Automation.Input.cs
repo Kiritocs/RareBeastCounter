@@ -593,6 +593,11 @@ public partial class RareBeastCounter
     private async Task ApplyBestiarySearchRegexAsync(string regex)
     {
         ThrowIfAutomationStopRequested();
+        if (!await WaitForBestiaryCapturedBeastsDisplayAsync())
+        {
+            EnsureBestiaryCapturedBeastsTabVisible("applying the Bestiary search");
+            throw new InvalidOperationException("Captured Beasts display is not ready while applying the Bestiary search.");
+        }
 
         if (string.IsNullOrWhiteSpace(regex))
         {
@@ -603,8 +608,24 @@ public partial class RareBeastCounter
         ImGui.SetClipboardText(regex);
 
         var timing = AutomationTiming;
+        await DelayForUiCheckAsync(150);
+
+        if (!await WaitForBestiaryCapturedBeastsDisplayAsync())
+        {
+            EnsureBestiaryCapturedBeastsTabVisible("opening the Bestiary search");
+            throw new InvalidOperationException("Captured Beasts display is not ready before opening the Bestiary search.");
+        }
+
         await CtrlTapKeyAsync(Keys.F, timing.KeyTapDelayMs, timing.FastPollDelayMs);
-        await CtrlTapKeyAsync(Keys.A, timing.KeyTapDelayMs, timing.KeyTapDelayMs);
+        EnsureBestiaryCapturedBeastsTabVisible("opening the Bestiary search");
+        await DelayForUiCheckAsync(150);
+
+        if (!await WaitForBestiaryCapturedBeastsDisplayAsync())
+        {
+            EnsureBestiaryCapturedBeastsTabVisible("pasting the Bestiary search");
+            throw new InvalidOperationException("Captured Beasts display is not ready before pasting the Bestiary search.");
+        }
+
         await PasteClipboardAsync();
         await DelayForUiCheckAsync(150);
     }
@@ -675,6 +696,31 @@ public partial class RareBeastCounter
     private bool IsBestiaryChallengePanelOpen()
     {
         return TryGetBestiaryCapturedBeastsButton()?.IsVisible == true;
+    }
+
+    private Element TryGetBestiaryPanel()
+    {
+        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryPanelPath);
+    }
+
+    private Element TryGetBestiaryCapturedBeastsTab()
+    {
+        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryCapturedBeastsTabPath);
+    }
+
+    private bool IsBestiaryCapturedBeastsTabVisible()
+    {
+        return TryGetBestiaryCapturedBeastsTab()?.IsVisible == true;
+    }
+
+    private void EnsureBestiaryCapturedBeastsTabVisible(string actionContext)
+    {
+        if (IsBestiaryCapturedBeastsTabVisible())
+        {
+            return;
+        }
+
+        throw new InvalidOperationException($"Captured Beasts tab is not visible while {actionContext}.");
     }
 
     private bool IsBestiaryCapturedBeastsWindowOpen()
@@ -805,17 +851,20 @@ public partial class RareBeastCounter
 
         if (IsBestiaryChallengePanelOpen())
         {
+            LogBestiaryUiState("Einhar interaction skipped because challenge panel is already open");
             return true;
         }
 
         var timing = AutomationTiming;
-        while (!IsBestiaryChallengePanelOpen())
+        for (var attempt = 1; !IsBestiaryChallengePanelOpen(); attempt++)
         {
             ThrowIfAutomationStopRequested();
+            LogBestiaryUiState($"Einhar interaction attempt {attempt} before locating Einhar");
 
             var einhar = await WaitForMenagerieEinharAsync();
             if (einhar == null)
             {
+                LogBestiaryUiState($"Einhar interaction attempt {attempt} failed to locate Einhar");
                 UpdateAutomationStatus("Could not find Einhar in The Menagerie.");
                 return false;
             }
@@ -825,14 +874,21 @@ public partial class RareBeastCounter
                 ? "Opening Einhar..."
                 : "Moving to Einhar...";
 
+            LogAutomationDebug($"Einhar interaction attempt {attempt}. einhar={DescribeEntity(einhar)}, distance={(distance.HasValue ? distance.Value.ToString("0.#") : "null")}, status='{statusMessage}'");
             UpdateAutomationStatus(statusMessage);
             await CtrlClickWorldEntityAsync(einhar);
+            LogBestiaryUiState($"Einhar interaction attempt {attempt} after ctrl-click");
 
-            if (IsBestiaryChallengePanelOpen() || await WaitForBestiaryCapturedBeastsButtonAsync())
+            var panelOpenImmediately = IsBestiaryChallengePanelOpen();
+            var buttonVisibleAfterWait = panelOpenImmediately || await WaitForBestiaryCapturedBeastsButtonAsync();
+            LogAutomationDebug($"Einhar interaction attempt {attempt} result. panelOpenImmediately={panelOpenImmediately}, buttonVisibleAfterWait={buttonVisibleAfterWait}");
+            LogBestiaryUiState($"Einhar interaction attempt {attempt} after waiting for challenge panel");
+            if (buttonVisibleAfterWait)
             {
                 return true;
             }
 
+            LogAutomationDebug($"Einhar interaction attempt {attempt} did not detect the challenge panel. Retrying after delay {timing.StashOpenPollDelayMs}ms.");
             await DelayAutomationAsync(timing.StashOpenPollDelayMs);
         }
 
@@ -875,17 +931,7 @@ public partial class RareBeastCounter
     {
         try
         {
-            Element element = GameController?.IngameState?.IngameUi;
-            foreach (var childIndex in BestiaryCapturedBeastsButtonContainerPath)
-            {
-                element = element?.GetChildAtIndex(childIndex);
-                if (element == null)
-                {
-                    return null;
-                }
-            }
-
-            return element;
+            return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryCapturedBeastsButtonContainerPath);
         }
         catch
         {
@@ -902,8 +948,16 @@ public partial class RareBeastCounter
 
     private async Task EnsureBestiaryCapturedBeastsWindowOpenAsync()
     {
+        if (IsBestiaryCapturedBeastsTabVisible())
+        {
+            LogAutomationDebug("Bestiary Captured Beasts window is already open");
+            LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync early return: captured tab visible");
+            return;
+        }
+
         if (IsBestiaryCapturedBeastsWindowOpen())
         {
+            LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync early return: display already open");
             return;
         }
 
@@ -912,17 +966,36 @@ public partial class RareBeastCounter
             throw new InvalidOperationException("Timed out opening the challenge panel.");
         }
 
+        LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync after Einhar interaction");
+
+        if (IsBestiaryCapturedBeastsTabVisible())
+        {
+            LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync early return after Einhar interaction: captured tab visible");
+            return;
+        }
+
+        if (IsBestiaryCapturedBeastsWindowOpen())
+        {
+            LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync early return after Einhar interaction: display already open");
+            return;
+        }
+
         var capturedBeastsButton = TryGetBestiaryCapturedBeastsButton();
         if (capturedBeastsButton == null)
         {
+            LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync could not resolve captured beasts button");
             throw new InvalidOperationException("Could not find the captured beasts button.");
         }
 
         for (var attempt = 0; attempt < 2; attempt++)
         {
+            LogAutomationDebug($"Clicking Captured Beasts button. attempt={attempt + 1}, button={DescribeElement(capturedBeastsButton)}");
             await ClickBestiaryCapturedBeastsButtonAsync(capturedBeastsButton);
             await DelayForUiCheckAsync(200);
-            if (await WaitForBestiaryCapturedBeastsDisplayAsync())
+            var displayOpened = await WaitForBestiaryCapturedBeastsDisplayAsync();
+            LogAutomationDebug($"Captured Beasts button click result. attempt={attempt + 1}, displayOpened={displayOpened}");
+            LogBestiaryUiState($"EnsureBestiaryCapturedBeastsWindowOpenAsync after button click attempt {attempt + 1}");
+            if (displayOpened)
             {
                 return;
             }
@@ -930,6 +1003,7 @@ public partial class RareBeastCounter
             capturedBeastsButton = TryGetBestiaryCapturedBeastsButton();
             if (capturedBeastsButton == null)
             {
+                LogBestiaryUiState($"EnsureBestiaryCapturedBeastsWindowOpenAsync lost captured beasts button after attempt {attempt + 1}");
                 break;
             }
         }
@@ -950,7 +1024,7 @@ public partial class RareBeastCounter
     private async Task<bool> WaitForBestiaryCapturedBeastsDisplayAsync()
     {
         return await WaitForBestiaryConditionAsync(
-            () => TryGetBestiaryCapturedBeastsDisplay(out _, out _),
+            () => IsBestiaryCapturedBeastsTabVisible() && TryGetBestiaryCapturedBeastsDisplay(out _, out _),
             4000,
             Math.Max(AutomationTiming.FastPollDelayMs, 25));
     }
@@ -978,7 +1052,7 @@ public partial class RareBeastCounter
     private async Task<bool> WaitForBestiaryCapturedBeastsToPopulateAsync()
     {
         return await WaitForBestiaryConditionAsync(
-            () => GetBestiaryTotalCapturedBeastCount() > 0 || GetVisibleBestiaryCapturedBeasts().Count > 0,
+            () => IsBestiaryCapturedBeastsTabVisible() && (GetBestiaryTotalCapturedBeastCount() > 0 || GetVisibleBestiaryCapturedBeasts().Count > 0),
             500,
             Math.Max(AutomationTiming.FastPollDelayMs, 25));
     }
@@ -1067,6 +1141,7 @@ public partial class RareBeastCounter
             while (true)
             {
                 ThrowIfAutomationStopRequested();
+                EnsureBestiaryCapturedBeastsTabVisible("clearing captured beasts");
 
                 if (!deleteBeasts && GetPlayerInventoryFreeCellCount() <= 0)
                 {
@@ -1157,8 +1232,9 @@ public partial class RareBeastCounter
     private async Task<int> WaitForBestiaryReleaseVisibleCountAsync(int previousVisibleCount)
     {
         await WaitForBestiaryConditionAsync(
-            () => GetBestiaryTotalCapturedBeastCount() < previousVisibleCount,
+            () => IsBestiaryCapturedBeastsTabVisible() && GetBestiaryTotalCapturedBeastCount() < previousVisibleCount,
             BestiaryReleaseTimeoutMs);
+        EnsureBestiaryCapturedBeastsTabVisible("waiting for captured beasts to update");
         return GetBestiaryTotalCapturedBeastCount();
     }
 

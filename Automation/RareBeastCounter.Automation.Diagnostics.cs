@@ -170,5 +170,20 @@ public partial class RareBeastCounter
         return builder.ToString();
     }
 
+    private void LogBestiaryUiState(string context)
+    {
+        var ingameUi = GameController?.IngameState?.IngameUi;
+        var bestiaryPanel = TryGetBestiaryPanel();
+        var capturedTab = TryGetBestiaryCapturedBeastsTab();
+        var buttonContainer = TryGetBestiaryCapturedBeastsButtonContainer();
+        var capturedButton = TryGetBestiaryCapturedBeastsButton();
+        var windowOpen = TryGetBestiaryCapturedBeastsDisplay(out var beastsDisplay, out var visibleRect);
+
+        LogAutomationDebug(
+            $"Bestiary UI [{context}] challengeOpen={capturedButton?.IsVisible == true}, capturedTabVisible={capturedTab?.IsVisible == true}, windowOpen={windowOpen}, panel={DescribeElement(bestiaryPanel)}, capturedTab={DescribeElement(capturedTab)}, buttonContainer={DescribeElement(buttonContainer)}, capturedButton={DescribeElement(capturedButton)}, beastsDisplay={DescribeElement(beastsDisplay)}, visibleRect={DescribeRect(visibleRect)}");
+        LogAutomationDebug(
+            $"Bestiary UI paths [{context}] panelPath={DescribePath(BestiaryPanelPath)}, panelTrace={DescribePathLookup(ingameUi, BestiaryPanelPath)}, capturedTabPath={DescribePath(BestiaryCapturedBeastsTabPath)}, capturedTabTrace={DescribePathLookup(ingameUi, BestiaryCapturedBeastsTabPath)}, buttonContainerPath={DescribePath(BestiaryCapturedBeastsButtonContainerPath)}, buttonContainerTrace={DescribePathLookup(ingameUi, BestiaryCapturedBeastsButtonContainerPath)}");
+    }
+
     #endregion
 }

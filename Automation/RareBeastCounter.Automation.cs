@@ -21,6 +21,8 @@ public partial class RareBeastCounter
     private const string MenagerieEinharMetadata = "Metadata/NPC/League/Bestiary/EinharMenagerie";
     private const string CapturedMonsterItemPathFragment = "CapturedMonster";
     private const string SettingsFileName = "RareBeastCounter_settings.json";
+    private static readonly int[] BestiaryPanelPath = [50, 2, 0, 1, 1, 15];
+    private static readonly int[] BestiaryCapturedBeastsTabPath = [50, 2, 0, 1, 1, 15, 0, 18];
     private static readonly int[] BestiaryCapturedBeastsButtonContainerPath = [50, 2, 0, 1, 1, 15, 0, 19];
     private static readonly int[] BestiaryDeleteButtonPathFromBeastRow = [3];
     private static readonly int[] BestiaryDeleteConfirmationWindowPath = [0];
@@ -244,6 +246,7 @@ public partial class RareBeastCounter
             await EnsureTravelToMenagerieAsync();
 
             await EnsureBestiaryCapturedBeastsWindowOpenAsync();
+            EnsureBestiaryCapturedBeastsTabVisible("starting Bestiary clear automation");
 
             var deleteBeasts = ShouldDeleteBestiaryBeasts();
             if (!deleteBeasts && !await EnsureBestiaryItemizingCapacityAsync())
@@ -296,8 +299,8 @@ public partial class RareBeastCounter
         }
 
         _bestiaryDeleteModeOverride = false;
-        _bestiaryAutoStashOverride = Settings.BestiaryAutomation.RegexItemizeAutoStash.Value;
         BeginAutomationRun(isBestiaryClearRunning: true);
+        _bestiaryAutoStashOverride = Settings.BestiaryAutomation.RegexItemizeAutoStash.Value;
 
         try
         {
