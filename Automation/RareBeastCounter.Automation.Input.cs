@@ -62,6 +62,63 @@ public partial class RareBeastCounter
         return Math.Max(0, GameController?.Game?.IngameState?.ServerData?.Latency ?? 0);
     }
 
+    private bool IsAutomationBlockingUiOpen()
+    {
+        var ui = GameController?.IngameState?.IngameUi;
+        if (ui == null)
+        {
+            return false;
+        }
+
+        return ui.StashElement?.IsVisible == true ||
+               ui.NpcDialog?.IsVisible == true ||
+               ui.SellWindow?.IsVisible == true ||
+               ui.PurchaseWindow?.IsVisible == true ||
+               ui.InventoryPanel?.IsVisible == true ||
+               ui.TreePanel?.IsVisible == true ||
+               ui.Atlas?.IsVisible == true ||
+               ui.AtlasTreePanel?.IsVisible == true ||
+               ui.RitualWindow?.IsVisible == true ||
+               ui.OpenLeftPanel?.IsVisible == true ||
+               ui.OpenRightPanel?.IsVisible == true ||
+               ui.TradeWindow?.IsVisible == true ||
+               ui.ChallengesPanel?.IsVisible == true ||
+               ui.CraftBench?.IsVisible == true ||
+               ui.DelveWindow?.IsVisible == true ||
+               ui.ExpeditionWindow?.IsVisible == true ||
+               ui.BanditDialog?.IsVisible == true ||
+               ui.MetamorphWindow?.IsVisible == true ||
+               ui.SyndicatePanel?.IsVisible == true ||
+               ui.SyndicateTree?.IsVisible == true ||
+               ui.QuestRewardWindow?.IsVisible == true ||
+               ui.MapDeviceWindow?.IsVisible == true ||
+               ui.SettingsPanel?.IsVisible == true ||
+               ui.PopUpWindow?.IsVisible == true;
+    }
+
+    private async Task CloseBlockingUiWithSpaceAsync(Func<bool> isBlockingUiOpen, string debugContext, int maxAttempts = 1, bool throwOnFailure = false)
+    {
+        if (isBlockingUiOpen == null || !isBlockingUiOpen())
+        {
+            return;
+        }
+
+        var timing = AutomationTiming;
+        for (var attempt = 1; attempt <= Math.Max(1, maxAttempts) && isBlockingUiOpen(); attempt++)
+        {
+            ThrowIfAutomationStopRequested();
+            UpdateAutomationStatus("Closing UI...");
+            LogAutomationDebug($"Closing blocking UI for {debugContext}. attempt={attempt}/{Math.Max(1, maxAttempts)}");
+            await TapKeyAsync(Keys.Space, timing.KeyTapDelayMs, timing.FastPollDelayMs);
+            await DelayForUiCheckAsync(150);
+        }
+
+        if (throwOnFailure && isBlockingUiOpen())
+        {
+            throw new InvalidOperationException("Could not close all open UI panels.");
+        }
+    }
+
     private void DrawTargetTabSelector(string label, string idSuffix, StashAutomationTargetSettings target, IReadOnlyList<string> stashTabNames)
     {
         var previewText = string.IsNullOrWhiteSpace(target.SelectedTabName.Value) ? "Select tab" : target.SelectedTabName.Value;
@@ -700,12 +757,12 @@ public partial class RareBeastCounter
 
     private Element TryGetBestiaryPanel()
     {
-        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryPanelPath);
+        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiaryPanelPath);
     }
 
     private Element TryGetBestiaryCapturedBeastsTab()
     {
-        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryCapturedBeastsTabPath);
+        return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiaryCapturedBeastsTabPath);
     }
 
     private bool IsBestiaryCapturedBeastsTabVisible()
@@ -931,7 +988,7 @@ public partial class RareBeastCounter
     {
         try
         {
-            return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi, BestiaryCapturedBeastsButtonContainerPath);
+            return TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiaryCapturedBeastsButtonContainerPath);
         }
         catch
         {
@@ -946,7 +1003,90 @@ public partial class RareBeastCounter
             4000);
     }
 
-    private async Task EnsureBestiaryCapturedBeastsWindowOpenAsync()
+    private Element TryGetBestiaryChallengesBestiaryButton()
+    {
+        var challengesEntriesRoot = TryGetElementByPathQuietly(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiaryChallengesEntriesRootPath);
+        var challengeEntries = challengesEntriesRoot?.Children;
+        if (challengeEntries == null)
+        {
+            return null;
+        }
+
+        foreach (var challengeEntry in challengeEntries)
+        {
+            if (challengeEntry?.IsVisible != true)
+            {
+                continue;
+            }
+
+            var entryText = TryGetChildFromIndicesQuietly(challengeEntry, BestiaryChallengesEntryTextPath)?.Text?.Trim();
+            if (string.Equals(entryText, "Bestiary", StringComparison.OrdinalIgnoreCase))
+            {
+                return challengeEntry;
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<bool> EnsureBestiaryChallengePanelOpenFromConfiguredHotkeyAsync()
+    {
+        ThrowIfAutomationStopRequested();
+
+        if (IsBestiaryChallengePanelOpen())
+        {
+            LogBestiaryUiState("Challenges hotkey open skipped because challenge panel is already open");
+            return true;
+        }
+
+        var hotkey = Settings?.BestiaryAutomation?.ChallengesWindowHotkey?.Value ?? Keys.None;
+        if (hotkey == Keys.None)
+        {
+            throw new InvalidOperationException("Set the Bestiary Automation Challenges Window Hotkey to match the Path of Exile Challenges keybind before using delete mode outside The Menagerie.");
+        }
+
+        var timing = AutomationTiming;
+        for (var attempt = 1; attempt <= 2 && !IsBestiaryChallengePanelOpen(); attempt++)
+        {
+            ThrowIfAutomationStopRequested();
+            UpdateAutomationStatus("Opening Challenges...");
+            LogAutomationDebug($"Opening Bestiary challenge panel with configured hotkey. attempt={attempt}, key={hotkey}");
+            await TapKeyAsync(hotkey, timing.KeyTapDelayMs, timing.FastPollDelayMs);
+
+            var bestiaryButtonVisible = await WaitForBestiaryConditionAsync(
+                () => TryGetBestiaryChallengesBestiaryButton()?.IsVisible == true,
+                2000,
+                Math.Max(timing.FastPollDelayMs, 25));
+            if (!bestiaryButtonVisible)
+            {
+                LogAutomationDebug($"Challenges hotkey attempt {attempt} did not reveal a visible Bestiary entry under path {DescribePath(BestiaryChallengesEntriesRootPath)}.");
+                await DelayAutomationAsync(timing.StashOpenPollDelayMs);
+                continue;
+            }
+
+            var bestiaryButton = TryGetBestiaryChallengesBestiaryButton();
+            LogAutomationDebug($"Clicking Bestiary entry from Challenges panel. attempt={attempt}, button={DescribeElement(bestiaryButton)}");
+            await ClickAtAsync(
+                bestiaryButton.GetClientRect().Center,
+                holdCtrl: false,
+                preClickDelayMs: timing.UiClickPreDelayMs,
+                postClickDelayMs: Math.Max(timing.MinTabClickPostDelayMs, timing.FastPollDelayMs));
+
+            var panelOpened = await WaitForBestiaryCapturedBeastsButtonAsync();
+            LogAutomationDebug($"Challenges hotkey attempt {attempt} result. panelOpened={panelOpened}");
+            LogBestiaryUiState($"Challenges hotkey attempt {attempt} after waiting for challenge panel");
+            if (panelOpened)
+            {
+                return true;
+            }
+
+            await DelayAutomationAsync(timing.StashOpenPollDelayMs);
+        }
+
+        return IsBestiaryChallengePanelOpen();
+    }
+
+    private async Task EnsureBestiaryCapturedBeastsWindowOpenAsync(bool openViaChallengesHotkey = false)
     {
         if (IsBestiaryCapturedBeastsTabVisible())
         {
@@ -961,9 +1101,14 @@ public partial class RareBeastCounter
             return;
         }
 
-        if (!await EnsureMenagerieEinharInteractionAsync())
+        var challengePanelOpened = openViaChallengesHotkey
+            ? await EnsureBestiaryChallengePanelOpenFromConfiguredHotkeyAsync()
+            : await EnsureMenagerieEinharInteractionAsync();
+        if (!challengePanelOpened)
         {
-            throw new InvalidOperationException("Timed out opening the challenge panel.");
+            throw new InvalidOperationException(openViaChallengesHotkey
+                ? "Timed out opening the Challenges window with the configured hotkey."
+                : "Timed out opening the challenge panel.");
         }
 
         LogBestiaryUiState("EnsureBestiaryCapturedBeastsWindowOpenAsync after Einhar interaction");
@@ -1031,7 +1176,7 @@ public partial class RareBeastCounter
 
     private bool IsBestiaryWorldUiOpen()
     {
-        return GameController?.IngameState?.IngameUi?.StashElement?.IsVisible == true ||
+        return IsAutomationBlockingUiOpen() ||
                IsBestiaryCapturedBeastsWindowOpen() ||
                IsBestiaryChallengePanelOpen() ||
                TryGetBestiaryDeleteConfirmationWindow()?.IsVisible == true;
@@ -1039,14 +1184,7 @@ public partial class RareBeastCounter
 
     private async Task CloseBestiaryWorldUiAsync()
     {
-        if (!IsBestiaryWorldUiOpen())
-        {
-            return;
-        }
-
-        var timing = AutomationTiming;
-        await TapKeyAsync(Keys.Space, timing.KeyTapDelayMs, timing.FastPollDelayMs);
-        await DelayForUiCheckAsync(150);
+        await CloseBlockingUiWithSpaceAsync(IsBestiaryWorldUiOpen, "bestiary world UI");
     }
 
     private async Task<bool> WaitForBestiaryCapturedBeastsToPopulateAsync()

@@ -19,11 +19,15 @@ public partial class RareBeastCounter
 
     private const string MenagerieAreaName = "The Menagerie";
     private const string MenagerieEinharMetadata = "Metadata/NPC/League/Bestiary/EinharMenagerie";
+    private const string HideoutMapDeviceMetadata = "Metadata/Terrain/Missions/Hideouts/Objects/StrDexIntMappingDevice";
+    private const string HideoutMapDeviceName = "Map Device";
     private const string CapturedMonsterItemPathFragment = "CapturedMonster";
     private const string SettingsFileName = "RareBeastCounter_settings.json";
-    private static readonly int[] BestiaryPanelPath = [50, 2, 0, 1, 1, 15];
-    private static readonly int[] BestiaryCapturedBeastsTabPath = [50, 2, 0, 1, 1, 15, 0, 18];
-    private static readonly int[] BestiaryCapturedBeastsButtonContainerPath = [50, 2, 0, 1, 1, 15, 0, 19];
+    private static readonly int[] BestiaryPanelPath = [2, 0, 1, 1, 15];
+    private static readonly int[] BestiaryCapturedBeastsTabPath = [2, 0, 1, 1, 15, 0, 18];
+    private static readonly int[] BestiaryCapturedBeastsButtonContainerPath = [2, 0, 1, 1, 15, 0, 19];
+    private static readonly int[] BestiaryChallengesEntriesRootPath = [2, 0, 1, 0];
+    private static readonly int[] BestiaryChallengesEntryTextPath = [0, 1];
     private static readonly int[] BestiaryDeleteButtonPathFromBeastRow = [3];
     private static readonly int[] BestiaryDeleteConfirmationWindowPath = [0];
     private static readonly int[] BestiaryDeleteConfirmationOkayButtonPath = [0, 0, 3, 0];
@@ -38,9 +42,13 @@ public partial class RareBeastCounter
     private static readonly int[] MapStashPageContentPath = [2, 0, 0, 1, 1, 3, 0, 4];
     private const int MenagerieTravelTimeoutMs = 15000;
     private const int BestiaryReleaseTimeoutMs = 250;
+    private const int MapDeviceOpenTimeoutMs = 4000;
+    private const int MapDeviceTransferTimeoutMs = 3000;
+    private const int MapDeviceCloseUiMaxAttempts = 6;
     private const int MapTransferExtraConfirmationDelayMs = 10;
     private const int QuantitySettleStableWindowMs = 100;
     private static readonly AutomationTimingValues AutomationTiming = new();
+
     private string _lastAutomationStatusMessage;
     private bool _isAutomationRunning;
     private bool _isBestiaryClearRunning;
@@ -243,12 +251,19 @@ public partial class RareBeastCounter
 
         try
         {
-            await EnsureTravelToMenagerieAsync();
+            var deleteBeasts = ShouldDeleteBestiaryBeasts();
+            if (deleteBeasts)
+            {
+                await EnsureBestiaryCapturedBeastsWindowOpenAsync(openViaChallengesHotkey: true);
+            }
+            else
+            {
+                await EnsureTravelToMenagerieAsync();
+                await EnsureBestiaryCapturedBeastsWindowOpenAsync();
+            }
 
-            await EnsureBestiaryCapturedBeastsWindowOpenAsync();
             EnsureBestiaryCapturedBeastsTabVisible("starting Bestiary clear automation");
 
-            var deleteBeasts = ShouldDeleteBestiaryBeasts();
             if (!deleteBeasts && !await EnsureBestiaryItemizingCapacityAsync())
             {
                 return;

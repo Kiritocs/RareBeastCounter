@@ -257,11 +257,18 @@ public partial class RareBeastCounter
                 nextPageItem = FindNextMatchingMapStashPageItem(visiblePageItems, sourceMetadata) ?? nextPageItem;
                 var availableBeforeTransfer = GetVisibleMapStashPageMatchingQuantity(sourceMetadata);
                 var inventoryBeforeTransfer = TryGetVisiblePlayerInventoryMatchingQuantity(sourceMetadata);
+                var remainingRequestedQuantity = Math.Max(0, target.Quantity.Value - (inventoryBeforeTransfer ?? 0));
+                if (remainingRequestedQuantity <= 0)
+                {
+                    return 0;
+                }
+
                 var timing = AutomationTiming;
                 var batchTransferTargets = (visiblePageItems ?? (nextPageItem?.Entity != null ? [nextPageItem] : []))
                     .Where(item => string.Equals(item?.Entity?.Metadata, sourceMetadata, StringComparison.OrdinalIgnoreCase))
                     .OrderBy(item => item.GetClientRect().Top)
                     .ThenBy(item => item.GetClientRect().Left)
+                    .Take(remainingRequestedQuantity)
                     .Select(item => new
                     {
                         Position = item.GetClientRect().Center,
@@ -278,7 +285,7 @@ public partial class RareBeastCounter
                 var expectedSlotFillBeforeTransfer = CountOccupiedPlayerInventoryCells(expectedLandingSlots);
                 LogAutomationDebug($"Predicted inventory landing slots for map batch. metadata='{sourceMetadata}', slots={DescribePlayerInventoryCells(expectedLandingSlots)}, occupiedBefore={expectedSlotFillBeforeTransfer}/{expectedLandingSlots.Count}");
 
-                LogAutomationDebug($"Batch transferring visible map stash page items. metadata='{sourceMetadata}', targetCount={batchTransferTargets.Count}, attemptedQuantity={attemptedTransferQuantity}, previousQuantity={availableBeforeTransfer}");
+                LogAutomationDebug($"Batch transferring visible map stash page items. metadata='{sourceMetadata}', remainingRequested={remainingRequestedQuantity}, targetCount={batchTransferTargets.Count}, attemptedQuantity={attemptedTransferQuantity}, previousQuantity={availableBeforeTransfer}");
                 foreach (var batchTarget in batchTransferTargets)
                 {
                     ThrowIfAutomationStopRequested();

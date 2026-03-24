@@ -388,6 +388,14 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             return;
         }
 
+        var loadMapDeviceHotkey = automation.LoadMapDeviceHotkey;
+        if (loadMapDeviceHotkey.Value != Keys.None && loadMapDeviceHotkey.PressedOnce())
+        {
+            LogAutomationDebug($"Load map device hotkey pressed. key={loadMapDeviceHotkey.Value}");
+            _ = RunMapDeviceAutomationFromHotkeyAsync();
+            return;
+        }
+
         var restockHotkey = automation.RestockHotkey;
         if (restockHotkey.Value == Keys.None)
         {
@@ -419,10 +427,12 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     private void DrawCounterAndCompletedMessage()
     {
         BuildCounterDisplay(out var counterText, out var allBeastsFound);
+        var allTrackedValuableBeastsCaptured = allBeastsFound && AreAllTrackedValuableBeastsCaptured();
 
         var counterWindow = Settings.CounterWindow;
         var completedCounter = counterWindow.CompletedStyle;
         var completedMessage = counterWindow.CompletedMessage;
+        var trackedCompletionMessage = counterWindow.TrackedCompletionMessage;
         var showCompletedCounterStyle = allBeastsFound || completedCounter.ShowWhileNotComplete.Value;
 
         if (counterWindow.Show.Value)
@@ -450,23 +460,47 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
             !string.IsNullOrWhiteSpace(completedMessage.Text.Value) &&
             (allBeastsFound || completedMessage.ShowWhileNotComplete.Value);
 
-        if (!shouldShowCompletedMessage)
+        var shouldShowTrackedCompletionMessage =
+            trackedCompletionMessage.Show.Value &&
+            !string.IsNullOrWhiteSpace(trackedCompletionMessage.Text.Value) &&
+            (allTrackedValuableBeastsCaptured || trackedCompletionMessage.ShowWhileNotComplete.Value);
+
+        if (!shouldShowCompletedMessage && !shouldShowTrackedCompletionMessage)
         {
             return;
         }
 
-        DrawOverlayWindow(
-            "##RareBeastCounterCompletedMessageOverlay",
-            completedMessage.Text.Value,
-            completedMessage.XPos.Value,
-            completedMessage.YPos.Value,
-            completedMessage.Padding.Value,
-            completedMessage.BorderThickness.Value,
-            completedMessage.BorderRounding.Value,
-            completedMessage.TextScale.Value,
-            completedMessage.TextColor.Value,
-            completedMessage.BorderColor.Value,
-            completedMessage.BackgroundColor.Value);
+        if (shouldShowCompletedMessage)
+        {
+            DrawOverlayWindow(
+                "##RareBeastCounterCompletedMessageOverlay",
+                completedMessage.Text.Value,
+                completedMessage.XPos.Value,
+                completedMessage.YPos.Value,
+                completedMessage.Padding.Value,
+                completedMessage.BorderThickness.Value,
+                completedMessage.BorderRounding.Value,
+                completedMessage.TextScale.Value,
+                completedMessage.TextColor.Value,
+                completedMessage.BorderColor.Value,
+                completedMessage.BackgroundColor.Value);
+        }
+
+        if (shouldShowTrackedCompletionMessage)
+        {
+            DrawOverlayWindow(
+                "##RareBeastCounterTrackedCompletionMessageOverlay",
+                trackedCompletionMessage.Text.Value,
+                trackedCompletionMessage.XPos.Value,
+                trackedCompletionMessage.YPos.Value,
+                trackedCompletionMessage.Padding.Value,
+                trackedCompletionMessage.BorderThickness.Value,
+                trackedCompletionMessage.BorderRounding.Value,
+                trackedCompletionMessage.TextScale.Value,
+                trackedCompletionMessage.TextColor.Value,
+                trackedCompletionMessage.BorderColor.Value,
+                trackedCompletionMessage.BackgroundColor.Value);
+        }
     }
 
     private void DrawAnalyticsWindow()
@@ -624,6 +658,36 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         }
 
         text = $"{CounterLabel}: {_rareBeastsFound}";
+    }
+
+    private bool AreAllTrackedValuableBeastsCaptured()
+    {
+        var enabledBeasts = Settings.BeastPrices.EnabledBeasts;
+
+        foreach (var (_, entity) in _trackedBeastEntities)
+        {
+            if (entity?.IsValid != true)
+            {
+                continue;
+            }
+
+            if (!TryGetTrackedBeastNameCached(entity.Metadata, out var beastName))
+            {
+                continue;
+            }
+
+            if (enabledBeasts.Count > 0 && !enabledBeasts.Contains(beastName))
+            {
+                continue;
+            }
+
+            if (GetBeastCaptureState(entity) != BeastCaptureState.Captured)
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private void ApplyBestiaryClipboard()

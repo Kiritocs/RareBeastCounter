@@ -104,6 +104,13 @@ public class CounterWindowSettings
 
     [Menu("Completed Message Overlay", "Separate message overlay shown after all beasts in the area are found.")]
     public CompletedMessageWindowSettings CompletedMessage { get; set; } = new();
+
+    [Menu("Tracked Completion Overlay", "Separate message overlay shown after all beasts are found and all tracked valuable beasts are captured.")]
+    public CompletedMessageWindowSettings TrackedCompletionMessage { get; set; } = new()
+    {
+        Text = new TextNode("All beasts found and tracked beasts captured!"),
+        YPos = new RangeNode<float>(20, 0, 100)
+    };
 }
 
 [Submenu(CollapsedByDefault = true)]
@@ -268,6 +275,9 @@ public class StashAutomationSettings
     [Menu("Restock Hotkey", "Hotkey that triggers stash restock automation.")]
     public HotkeyNode RestockHotkey { get; set; } = new(Keys.None);
 
+    [Menu("Load Map Device Hotkey", "Hotkey that closes open UI, opens the hideout Map Device, ctrl-clicks the configured targets from inventory, verifies the inserted items, and moves the cursor to Activate.")]
+    public HotkeyNode LoadMapDeviceHotkey { get; set; } = new(Keys.None);
+
     [Menu("Click Delay (ms)", "Delay between ctrl-click transfers.")]
     public RangeNode<int> ClickDelayMs { get; set; } = new(0, 0, 250);
 
@@ -309,8 +319,11 @@ public class StashAutomationSettings
 [Submenu(CollapsedByDefault = true)]
 public class BestiaryAutomationSettings
 {
-    [Menu("Clear Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, and clears captured beasts.")]
+    [Menu("Clear Hotkey", "Hotkey that clears captured beasts. In itemize mode it teleports to The Menagerie; in delete mode it uses the configured Challenges hotkey.")]
     public HotkeyNode ClearHotkey { get; set; } = new(Keys.None);
+
+    [Menu("Challenges Window Hotkey", "Hotkey used to open the Challenges window for delete-mode Bestiary clear. This must match the Challenges keybind configured in Path of Exile settings.")]
+    public HotkeyNode ChallengesWindowHotkey { get; set; } = new(Keys.None);
 
     [Menu("Regex Itemize Hotkey", "Hotkey that teleports to The Menagerie, opens the captured beasts panel, focuses Bestiary search, pastes the configured Bestiary Regex, and itemizes the matching beasts.")]
     public HotkeyNode RegexItemizeHotkey { get; set; } = new(Keys.None);
