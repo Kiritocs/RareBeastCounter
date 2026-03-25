@@ -262,7 +262,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
     {
         var now = DateTime.UtcNow;
         ApplyPauseMenuTimerState(now);
-        ApplyBestiaryClipboard();
+        HandleBestiaryClipboardAutoCopy();
         HandleAutomationHotkey();
         DrawBestiaryAutomationQuickButtons();
         DrawMenagerieInventoryQuickButton();
@@ -690,7 +690,7 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
         return true;
     }
 
-    private void ApplyBestiaryClipboard()
+    private void HandleBestiaryClipboardAutoCopy()
     {
         if (!Settings.BestiaryClipboard.EnableAutoCopy.Value)
         {
@@ -709,38 +709,33 @@ public partial class RareBeastCounter : BaseSettingsPlugin<RareBeastCounterSetti
                 !_isBestiaryClipboardPasteRunning &&
                 !string.IsNullOrWhiteSpace(regex))
             {
-                _ = AutoPasteBestiaryClipboardAsync(regex);
+                _isBestiaryClipboardPasteRunning = true;
+                _ = ApplyBestiaryClipboardAutoPasteAsync(regex);
             }
         }
 
         _wasBestiaryTabVisible = isVisible;
-    }
 
-    private async Task AutoPasteBestiaryClipboardAsync(string regex)
-    {
-        if (_isAutomationRunning || _isBestiaryClipboardPasteRunning || string.IsNullOrWhiteSpace(regex))
+        async Task ApplyBestiaryClipboardAutoPasteAsync(string regexToPaste)
         {
-            return;
-        }
-
-        _isBestiaryClipboardPasteRunning = true;
-        try
-        {
-            await DelayForUiCheckAsync(50);
-            if (_isAutomationRunning || !IsBestiaryTabVisible())
+            try
             {
-                return;
-            }
+                await DelayForUiCheckAsync(50);
+                if (_isAutomationRunning || !IsBestiaryTabVisible())
+                {
+                    return;
+                }
 
-            await ApplyBestiarySearchRegexAsync(regex);
-        }
-        catch (Exception ex)
-        {
-            LogAutomationDebug($"Bestiary clipboard auto-paste skipped. {ex.GetType().Name}: {ex.Message}");
-        }
-        finally
-        {
-            _isBestiaryClipboardPasteRunning = false;
+                await ApplyBestiarySearchRegexAsync(regexToPaste);
+            }
+            catch (Exception ex)
+            {
+                LogAutomationDebug($"Bestiary clipboard auto-paste skipped. {ex.GetType().Name}: {ex.Message}");
+            }
+            finally
+            {
+                _isBestiaryClipboardPasteRunning = false;
+            }
         }
     }
 

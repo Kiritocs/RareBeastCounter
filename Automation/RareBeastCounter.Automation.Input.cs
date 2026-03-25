@@ -673,6 +673,8 @@ public partial class RareBeastCounter
             throw new InvalidOperationException("Captured Beasts display is not ready before opening the Bestiary search.");
         }
 
+        await DelayForUiCheckAsync(100);
+
         await CtrlTapKeyAsync(Keys.F, timing.KeyTapDelayMs, timing.FastPollDelayMs);
         EnsureBestiaryCapturedBeastsTabVisible("opening the Bestiary search");
         await DelayForUiCheckAsync(150);
@@ -685,6 +687,13 @@ public partial class RareBeastCounter
 
         await PasteClipboardAsync();
         await DelayForUiCheckAsync(150);
+
+        var observedRegex = await WaitForBestiarySearchRegexTextAsync(regex, 500) ?? GetBestiarySearchRegexText();
+        if (!string.Equals(observedRegex, regex, StringComparison.Ordinal))
+        {
+            LogAutomationDebug($"Bestiary search regex mismatch after paste. expected='{regex}', observed='{observedRegex ?? "<null>"}', path={DescribePath(BestiarySearchRegexTextPath)}, pathTrace={DescribePathLookup(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiarySearchRegexTextPath)}, element={DescribeElement(TryGetBestiarySearchRegexTextElement())}");
+            throw new InvalidOperationException("Bestiary search regex did not match the configured value after paste.");
+        }
     }
 
     private async Task SendChatCommandAsync(string command)
@@ -1172,6 +1181,48 @@ public partial class RareBeastCounter
             () => IsBestiaryCapturedBeastsTabVisible() && TryGetBestiaryCapturedBeastsDisplay(out _, out _),
             4000,
             Math.Max(AutomationTiming.FastPollDelayMs, 25));
+    }
+
+    private Element TryGetBestiarySearchRegexTextElement()
+    {
+        return TryGetChildFromIndicesQuietly(GameController?.IngameState?.IngameUi?.ChallengesPanel, BestiarySearchRegexTextPath);
+    }
+
+    private string GetBestiarySearchRegexText()
+    {
+        var textElement = TryGetBestiarySearchRegexTextElement();
+        if (textElement == null)
+        {
+            return null;
+        }
+
+        return TryGetPropertyValueAsString(textElement, "Text")
+               ?? textElement.Text
+               ?? TryGetElementText(textElement)
+               ?? GetElementTextRecursive(textElement, 1);
+    }
+
+    private async Task<string> WaitForBestiarySearchRegexTextAsync(string expectedText, int timeoutMs)
+    {
+        var timing = AutomationTiming;
+        var startedAt = DateTime.UtcNow;
+        var adjustedTimeoutMs = GetAutomationTimeoutMs(timeoutMs);
+        string lastObservedText = null;
+
+        while ((DateTime.UtcNow - startedAt).TotalMilliseconds < adjustedTimeoutMs)
+        {
+            ThrowIfAutomationStopRequested();
+
+            lastObservedText = GetBestiarySearchRegexText();
+            if (string.Equals(lastObservedText, expectedText, StringComparison.Ordinal))
+            {
+                return lastObservedText;
+            }
+
+            await DelayAutomationAsync(timing.FastPollDelayMs);
+        }
+
+        return lastObservedText;
     }
 
     private bool IsBestiaryWorldUiOpen()

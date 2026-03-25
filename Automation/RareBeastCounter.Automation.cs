@@ -25,6 +25,7 @@ public partial class RareBeastCounter
     private const string SettingsFileName = "RareBeastCounter_settings.json";
     private static readonly int[] BestiaryPanelPath = [2, 0, 1, 1, 15];
     private static readonly int[] BestiaryCapturedBeastsTabPath = [2, 0, 1, 1, 15, 0, 18];
+    private static readonly int[] BestiarySearchRegexTextPath = [2, 0, 1, 1, 15, 0, 18, 0, 0, 1, 0];
     private static readonly int[] BestiaryCapturedBeastsButtonContainerPath = [2, 0, 1, 1, 15, 0, 19];
     private static readonly int[] BestiaryChallengesEntriesRootPath = [2, 0, 1, 0];
     private static readonly int[] BestiaryChallengesEntryTextPath = [0, 1];
